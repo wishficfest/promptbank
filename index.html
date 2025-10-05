@@ -1,9 +1,128 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta http-equiv="refresh" content="0; url=promptbank.html">
-  </head>
-  <body>
-    Redirecting to promptbank.html...
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Wish Fic Fest Prompt Bank</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Top utility bar -->
+  <div class="topbar">
+    <nav class="auth-left">
+      <a href="#" id="openSignUp">Sign up</a>
+      <a href="#" id="openSignIn">Sign in</a>
+      <a href="#" id="openForgot">Forgot password</a>
+    </nav>
+    <div class="right">
+      <a href="#" id="openAdmin" class="btn-pill">Admin</a>
+    </div>
+  </div>
+
+  <header>
+    <h1>📚 Wish Fic Fest Prompt Bank</h1>
+    <p>Browse our public library of prompts — sorted by ship, genre, character, and rating ✨</p>
+  </header>
+
+  <!-- Mascots row (quick character filter) -->
+  <div class="mascots">
+    <img src="images/nctwish.png" class="mascot" data-character="" title="All" alt="All" />
+    <img src="images/riku.png"   class="mascot" data-character="Riku"   title="Riku"   alt="Riku" />
+    <img src="images/yushi.png"  class="mascot" data-character="Yushi"  title="Yushi"  alt="Yushi" />
+    <img src="images/sion.png"   class="mascot" data-character="Sion"   title="Sion"   alt="Sion" />
+    <img src="images/jaehee.png" class="mascot" data-character="Jaehee" title="Jaehee" alt="Jaehee" />
+  </div>
+
+  <!-- Filters -->
+  <section id="filters">
+    <input type="text" id="searchBar" placeholder="Search prompts...">
+
+    <select id="shipFilter">
+      <option value="">All Ships</option>
+      <option>Riku/Yushi</option><option>Riku/Sion</option><option>Riku/Jaehee</option>
+      <option>Yushi/Sion</option><option>Yushi/Jaehee</option><option>Sion/Jaehee</option>
+      <option>Riku/Yushi/Sion</option><option>Riku/Yushi/Jaehee</option><option>Riku/Sion/Jaehee</option>
+      <option>Yushi/Sion/Jaehee</option><option>Riku/Yushi/Sion/Jaehee</option>
+    </select>
+
+    <select id="genreFilter">
+      <option value="">All Genres</option>
+      <option>Fluff</option><option>Angst</option><option>Crack</option>
+      <option>Hurt/Comfort</option><option>Hurt/Angst</option><option>Family</option>
+      <option>Fantasy</option><option>Coming of Age</option><option>Drama</option>
+      <option>Friendship</option><option>High School</option><option>School</option>
+      <option>Romance</option><option>Slice of Life</option><option>Teen</option>
+      <option>Workplace</option><option>Work</option><option>Smut</option>
+      <option>Comedy</option><option>Mystery</option><option>Psychological</option>
+      <option>Supernatural</option><option>Thriller</option><option>Western</option>
+      <option>Horror</option>
+    </select>
+
+    <select id="characterFilter">
+      <option value="">All Characters</option>
+      <option>Yushi</option><option>Riku</option><option>Jaehee</option><option>Sion</option>
+    </select>
+
+    <select id="ratingFilter">
+      <option value="">All Ratings</option>
+      <option>General</option><option>Teen</option><option>Mature</option><option>Explicit</option>
+    </select>
+
+    <button id="ao3PostedBtn" class="btn-sm">📖 AO3 Posted</button>
+    <button id="lovedFilterBtn" class="btn-sm">❤️ Loved</button>
+    <button id="randomPrompt" class="btn-sm">🎲 Surprise Me</button>
+
+    <a href="submit.html" class="btn-dark btn-sm">✍️ Contribute</a>
+  </section>
+
+  <!-- Prompt Grid -->
+  <section id="promptGrid" class="prompt-list"></section>
+
+  <footer><p>✨ Powered by Wish Fic Fest ✨</p></footer>
+
+  <!-- Auth modal -->
+  <div class="modal" id="authModal">
+    <div class="modal-card">
+      <button class="modal-close" data-close>✖</button>
+      <h3 id="authTitle">Sign up</h3>
+
+      <!-- Form utama (dipakai untuk signup & signin) -->
+      <form id="authForm" data-mode="signup">
+        <!-- WAJIB saat signup -->
+        <input type="text" id="authName" placeholder="Display name" />
+        <!-- Untuk signin: bisa email/username. Untuk signup: isi email -->
+        <input type="text" id="authEmailOrUser" placeholder="Email or username" />
+        <input type="password" id="authPassword" placeholder="Password" />
+        <button type="submit" class="btn-dark">Continue</button>
+      </form>
+
+      <!-- Forgot-only -->
+      <div id="forgotWrap" style="display:none;">
+        <input type="email" id="forgotEmail" placeholder="Your email" />
+        <button id="sendReset" class="btn-sm">Send reset link</button>
+      </div>
+
+      <p class="small" id="authMsg"></p>
+    </div>
+  </div>
+
+  <!-- Admin quick gate -->
+  <div class="modal" id="adminModal">
+    <div class="modal-card">
+      <button class="modal-close" data-close>✖</button>
+      <h3>Admin Login</h3>
+      <input id="adminUser" placeholder="Username" />
+      <input id="adminPass" placeholder="Password" type="password" />
+      <button id="goAdmin" class="btn-dark">Enter</button>
+    </div>
+  </div>
+
+  <!-- Supabase client -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    const supabaseUrl = "https://vkeisxxfexnsuwqqmduw.supabase.co";
+    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrZWlzeHhmZXhuc3V3cXFtZHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzODc3NjUsImV4cCI6MjA3NDk2Mzc2NX0.crOPV9tLVw6ruDWPBfS1XDvc3oJDq5_9dGquD2KCBeI";
+    window.supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+  </script>
+  <script src="app.js"></script>
+</body>
 </html>
