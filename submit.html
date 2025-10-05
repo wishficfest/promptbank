@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>✍️ Submit a Prompt</title>
+  <meta name="theme-color" content="#F5C1CF"/>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+  <style>
+    body {
+      transition: background 0.3s ease;
+    }
+    textarea {
+      transition: all 0.2s ease;
+    }
+    textarea:focus {
+      box-shadow: 0 0 10px #d8b4a0aa;
+    }
+    button {
+      transition: transform 0.15s ease, background-color 0.2s ease;
+    }
+    button:hover {
+      transform: translateY(-2px);
+    }
+
+    /* Toast styles */
+    #toast {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      color: white;
+      padding: 14px 22px;
+      border-radius: 12px;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(20px);
+      transition: all 0.4s ease;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    #toast.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    #toast.success {
+      background-color: #d8b4a0; /* soft pink-beige */
+    }
+    #toast.error {
+      background-color: #e74c3c; /* red for errors */
+    }
+  </style>
+</head>
+
+<body class="bg-[#FAF7F0] text-[#222] font-serif p-10">
+  <h1 class="text-4xl font-bold mb-4">✍️ Submit a Prompt</h1>
+  <p class="mb-6">Add new prompts. All submissions will be reviewed by an admin before appearing in the Prompt Bank.</p>
+
+  <h2 class="text-2xl font-bold mb-2">📘 Prompts will be reviewed by mods</h2>
+  <div id="promptList" class="mb-6 text-gray-700">
+    — DM 
+    <a href="https://x.com/wishficfest" target="_blank" class="text-blue-600 hover:underline font-medium">
+      @wishficfest on Twitter
+    </a> 
+    or 
+    <a href="mailto:wishficfest@gmail.com" class="text-blue-600 hover:underline font-medium">
+      email wishficfest@gmail.com
+    </a> —
+  </div>
+
+  <h2 class="text-2xl font-bold mb-2">Add New Prompt</h2>
+
+  <form id="promptForm" class="flex flex-col gap-4 items-start max-w-5xl">
+    <label class="font-semibold">Your Prompt:</label>
+    <textarea 
+      id="promptText" 
+      placeholder="Write your prompt or idea in detail..."
+      class="border p-3 w-full h-48 resize-y rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#d8b4a0]"
+    ></textarea>
+
+    <div class="flex flex-wrap gap-3 items-center w-full">
+      <div class="flex flex-col">
+        <label class="text-sm font-semibold mb-1">Rating</label>
+        <select id="rating" class="border p-1 rounded-md">
+          <option>General</option>
+          <option>Mature</option>
+          <option>Explicit</option>
+        </select>
+      </div>
+
+      <div class="flex flex-col">
+        <label class="text-sm font-semibold mb-1">Title</label>
+        <input type="text" id="title" placeholder="Prompt title" class="border p-1 w-52 rounded-md"/>
+      </div>
+
+      <div class="flex flex-col">
+        <label class="text-sm font-semibold mb-1">Ship</label>
+        <select id="shipFilter" class="border p-1 rounded-md w-52">
+          <option value="">All Ships</option>
+          <option>Riku/Yushi</option><option>Riku/Sion</option><option>Riku/Jaehee</option>
+          <option>Yushi/Sion</option><option>Yushi/Jaehee</option><option>Sion/Jaehee</option>
+          <option>Riku/Yushi/Sion</option><option>Riku/Yushi/Jaehee</option>
+          <option>Riku/Sion/Jaehee</option><option>Yushi/Sion/Jaehee</option>
+          <option>Riku/Yushi/Sion/Jaehee</option>
+        </select>
+      </div>
+
+      <div class="flex flex-col">
+        <label class="text-sm font-semibold mb-1">Genre</label>
+        <input type="text" id="genre" placeholder="Genre" class="border p-1 w-40 rounded-md"/>
+      </div>
+
+      <div class="flex flex-col">
+        <label class="text-sm font-semibold mb-1">Characters</label>
+        <input type="text" id="characters" placeholder="Comma separated" class="border p-1 w-60 rounded-md"/>
+      </div>
+    </div>
+
+    <button 
+      type="submit" 
+      class="mt-4 bg-[#d8b4a0] text-white px-5 py-2 rounded-md font-semibold hover:bg-[#b08a77] transition"
+    >
+      Submit Prompt
+    </button>
+  </form>
+
+  <p class="mt-8">
+    <a href="index.html" class="text-purple-700 underline">⬅ Back to Prompt Bank</a>
+  </p>
+
+  <!-- Toast notification -->
+  <div id="toast"></div>
+
+  <script>
+    // Initialize Supabase client (your working credentials)
+    const supabaseUrl = "https://vkeisxxfexnsuwqqmduw.supabase.co";
+    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrZWlzeHhmZXhuc3V3cXFtZHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzODc3NjUsImV4cCI6MjA3NDk2Mzc2NX0.crOPV9tLVw6ruDWPBfS1XDvc3oJDq5_9dGquD2KCBeI";
+    const sb = supabase.createClient(supabaseUrl, supabaseKey);
+
+    const form = document.getElementById("promptForm");
+    const toast = document.getElementById("toast");
+    const textarea = document.getElementById("promptText");
+
+    // Toast animation helper
+    function showToast(message, type = "success") {
+      toast.textContent = message;
+      toast.className = `show ${type}`;
+      setTimeout(() => {
+        toast.classList.remove("show");
+      }, 3000);
+    }
+
+    // Auto-expand textarea as user types
+    textarea.addEventListener("input", () => {
+      textarea.style.height = "auto";
+      textarea.style.height = textarea.scrollHeight + "px";
+    });
+
+    // Form submission
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const rating = document.getElementById("rating").value.trim();
+      const title = document.getElementById("title").value.trim();
+      const promptText = document.getElementById("promptText").value.trim();
+      const ship = document.getElementById("shipFilter").value.trim();
+      const genre = document.getElementById("genre").value.trim();
+      const characters = document.getElementById("characters").value.trim();
+
+      if (!promptText) {
+        showToast("Please write a prompt first!", "error");
+        return;
+      }
+
+      const { data, error } = await sb.from("prompts").insert([{
+        rating,
+        title,
+        prompt_text: promptText,
+        ship,
+        genre,
+        characters,
+        status: "pending",
+        created_at: new Date().toISOString()
+      }]);
+
+      if (error) {
+        console.error(error);
+        showToast("❌ Error submitting prompt", "error");
+      } else {
+        showToast("✨ Sent! Pending mod approval", "success");
+        form.reset();
+      }
+    });
+  </script>
+</body>
+</html>
+
