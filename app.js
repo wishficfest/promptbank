@@ -41,8 +41,7 @@ function truncateLead(text, max=180){
 /* outline color by ship -> CSS pairing classes */
 function pairClass(shipRaw){
   const s = (shipRaw||'').toLowerCase();
-  // fix: rapihin char class (hapus slash ganda)
-  const set = new Set(s.replace(/[^\w/ ,]/g,'').split(/[,\s/]+/).filter(Boolean));
+  const set = new Set(s.replace(/[^\w/ ,/]/g,'').split(/[,\s/]+/).filter(Boolean));
   const who = ['riku','yushi','sion','jaehee'].filter(n => set.has(n));
   if (!who.length) return '';
   const key = who.sort().join('-');
@@ -66,49 +65,45 @@ function pairClass(shipRaw){
 const state = loadStore();
 let prompts = []; // filled from Supabase
 
-/* ---------- Supabase load (final, single copy) ---------- */
+/* ---------- Supabase load (ambil >100 row, Safari-safe) ---------- */
 async function loadFromSupabase(){
-  try {
-    if (!window.supabase) throw new Error('supabase-js not loaded');
-    if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
-      throw new Error('Missing SUPABASE_URL / SUPABASE_ANON_KEY on window');
-    }
-
-    // Safari-safe: force CORS
-    const client = window.supabase.createClient(
-      window.SUPABASE_URL,
-      window.SUPABASE_ANON_KEY,
-      { global: { fetch: (url, opts) => fetch(url, { ...opts, mode: 'cors' }) } }
-    );
-
-    const sel = 'id,title,prompt,description,ship,genre,characters,rating,prompter';
-
-    // 1) count dulu biar tahu total row (tanpa data)
-    const { count, error: countErr } = await client
-      .from('prompts_public')
-      .select('*', { head: true, count: 'exact' });
-    if (countErr) throw countErr;
-    if (count == null) throw new Error('View not accessible (count=null). Check RLS / GRANT SELECT on prompts_public.');
-
-    // 2) ambil SEMUA row via range (hindari default limit 100)
-    const { data, error } = await client
-      .from('prompts_public')
-      .select(sel)
-      .range(0, Math.max(0, count - 1))
-      .order('title', { ascending: true });
-    if (error) throw error;
-    if (!Array.isArray(data) || !data.length) throw new Error('No rows returned from prompts_public');
-
-    // normalize id
-    prompts = data.map(r => ({ ...r, id: String(r.id) }));
-  } catch (err) {
-    console.error('[WFFPB] Supabase load failed:', err);
-    const grid = document.getElementById('promptGrid');
-    if (grid) {
-      grid.innerHTML = `<p style="padding:1rem">Couldn’t load prompts from Supabase.<br><b>${escapeHTML(err.message)}</b></p>`;
-    }
-    throw err;
+  if (!window.supabase) throw new Error('supabase-js not loaded');
+  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+    throw new Error('Missing SUPABASE_URL / SUPABASE_ANON_KEY on window');
   }
+
+  const client = window.supabase.createClient(
+    window.SUPABASE_URL,
+    window.SUPABASE_ANON_KEY,
+    { global: { fetch: (url, opts) => fetch(url, { ...opts, mode: 'cors' }) } }
+  );
+
+  // 1) get total rows without fetching data (avoids default 100 limit)
+  const { count, error: countErr } = await client
+    .from('prompts_public')
+    .select('*', { head: true, count: 'exact' });
+  if (countErr) throw countErr;
+  if (count == null) throw new Error('View not accessible (count=null). Check RLS/GRANT on prompts_public.');
+
+  // 2) fetch ALL rows & columns (use '*' so it doesn’t break when column names differ)
+  const { data, error } = await client
+    .from('prompts_public')
+    .select('*')
+    .range(0, Math.max(0, count - 1))
+    .order('title', { ascending: true });
+
+  if (error) throw error;
+  if (!Array.isArray(data)) throw new Error('No rows returned');
+
+  // 3) normalize to the shape your UI expects
+  prompts = data.map(r => ({
+    ...r,
+    id: String(r.id),
+    // Show "Prompter" in UI but source from submitted_by (fallback to prompter if exists; then 'anon')
+    prompter: (r.submitted_by ?? r.prompter ?? 'anon'),
+    // Handle either desc or description from the view
+    description: (r.description ?? r.desc ?? '-'),
+  }));
 }
 
 /* ---------- Render ---------- */
@@ -126,7 +121,7 @@ function renderCard(p){
   const local = state[p.id] || {};
   const gifts = local.gifts ?? [];
   const ao3s  = local.ao3s  ?? [];
-  const prompter = local.prompter ?? p.prompter ?? 'anon';
+  const prompter = (local.prompter ?? p.prompter ?? 'anon');
   const descText = p.description ?? '-';
 
   const lead = truncateLead(p.prompt || '');
@@ -206,7 +201,7 @@ function renderCardForModal(p){
   const local = state[p.id] || {};
   const gifts = local.gifts ?? [];
   const ao3s  = local.ao3s  ?? [];
-  const prompter = local.prompter ?? p.prompter ?? 'anon';
+  const prompter = (local.prompter ?? p.prompter ?? 'anon');
   const descText = p.description ?? '-';
 
   const wrap = document.createElement('article');
@@ -452,6 +447,6 @@ function openPromptModalById(id){
     if (location.hash && location.hash.startsWith('#prompt-')) handleHashRoute();
   }catch(e){
     console.error('[WFFPB] Supabase load failed:', e);
-    grid.innerHTML = `<p style="padding:1rem">Couldn’t load prompts from Supabase. Check RLS/view and keys in HTML.</p>`;
+    grid.innerHTML = `<p style="padding:1rem">Couldn’t load prompts from Supabase.<br><b>${escapeHTML(e.message)}</b></p>`;
   }
 })();
