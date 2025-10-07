@@ -68,14 +68,22 @@
     </div>
   </dialog>
 
-  <!-- (Optional) Supabase client; page works without it -->
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <!-- Supabase client (UMD -> window.supabase) -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
+    crossorigin="anonymous"
+    defer
+  ></script>
+
+  <!-- Runtime config (must be BEFORE app.js) -->
   <script>
-    // Keep here so you can wire Supabase later
     window.SUPABASE_URL      = "https://vkeisxxfexnsuwqqmduw.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrZWlzeHhmZXhuc3V3cXFtZHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzODc3NjUsImV4cCI6MjA3NDk2Mzc2NX0.crOPV9tLVw6ruDWPBfS1XDvc3oJDq5_9dGquD2KCBeI";
+    /* supaya link share rapi di GitHub Pages */
+    window.PUBLIC_BASE_URL   = "https://wishficfest.github.io/promptbank/";
   </script>
 
-  <script src="app.js"></script>
+  <!-- App -->
+  <script src="app.js" defer></script>
 </body>
 </html>
