@@ -1,55 +1,36 @@
 /* ===============================
    Wish Fic Fest Prompt Bank — JS
-   - Multi gift & AO3 links (+ remove)
-   - Edit Prompter only
-   - Read more on cards
-   - Pairing color outlines
-   - Filters + Mascot shortcuts
-   - Share: copy link AND navigate to #prompt-<id>
-   - Deep-link modal: open full prompt from hash
+   Supabase-only data source
    =============================== */
 
 /* ---------- Helpers ---------- */
-const STORE_KEY = 'wffpb:v6';
+const STORE_KEY = 'wffpb:v7';
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 
-function loadStore(){
-  try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
-  catch{ return {}; }
-}
-function saveStore(){
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
-}
+function loadStore(){ try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
+function saveStore(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
 
-/* robust copy (works https & file://) */
 function copyToClipboard(text){
-  if (navigator.clipboard && window.isSecureContext) {
-    return navigator.clipboard.writeText(text);
-  }
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
   return new Promise((resolve, reject)=>{
     try{
       const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.setAttribute('readonly','');
-      ta.style.position = 'absolute';
-      ta.style.left = '-9999px';
-      document.body.appendChild(ta);
-      ta.select(); ta.setSelectionRange(0, ta.value.length);
-      const ok = document.execCommand('copy');
-      document.body.removeChild(ta);
+      ta.value = text; ta.setAttribute('readonly',''); ta.style.position='absolute'; ta.style.left='-9999px';
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand('copy'); document.body.removeChild(ta);
       ok ? resolve() : reject(new Error('copy failed'));
     }catch(e){ reject(e); }
   });
 }
 
 function escapeHTML(s){
-  return String(s ?? '').replace(/[&<>"']/g, m => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[m]));
+  return String(s ?? '').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 const row = (L,R) => `<div class="meta-row"><b>${L}</b><span>${R}</span></div>`;
-const shareURL = (id) => `${location.origin}${location.pathname}#prompt-${id}`;
+
+const SHARE_BASE = (window.PUBLIC_BASE_URL || (location.origin + location.pathname)).replace(/#.*$/,'');
+const shareURL = (id) => `${SHARE_BASE}#prompt-${id}`;
 
 function truncateLead(text, max=180){
   const t = String(text || '');
@@ -57,84 +38,83 @@ function truncateLead(text, max=180){
   return t.slice(0, max).replace(/\s+\S*$/, '') + '…';
 }
 
-/* outline color by ship (maps to your CSS pairing classes) */
+/* outline color by ship -> CSS pairing classes */
 function pairClass(shipRaw){
   const s = (shipRaw||'').toLowerCase();
-  const set = new Set(
-    s.replace(/[^\w/ ,]/g,'')
-     .split(/[,\s/]+/)
-     .filter(Boolean)
-  );
+  // fix: rapihin char class (hapus slash ganda)
+  const set = new Set(s.replace(/[^\w/ ,]/g,'').split(/[,\s/]+/).filter(Boolean));
   const who = ['riku','yushi','sion','jaehee'].filter(n => set.has(n));
   if (!who.length) return '';
-  const key = who.sort().join('-'); // alphabetical
-
+  const key = who.sort().join('-');
   switch(key){
-    // 2
     case 'riku-jaehee': return 'pair-riku-jaehee';
     case 'riku-sion': return 'pair-riku-sion';
     case 'riku-yushi': return 'pair-riku-yushi';
     case 'jaehee-sion': return 'pair-sion-jaehee';
     case 'jaehee-yushi': return 'pair-yushi-jaehee';
     case 'sion-yushi': return 'pair-yushi-sion';
-    // 3
     case 'jaehee-riku-sion': return 'pair-riku-jaehee-sion';
     case 'jaehee-riku-yushi': return 'pair-riku-yushi-jaehee';
     case 'jaehee-sion-yushi': return 'pair-yushi-jaehee-sion';
     case 'riku-sion-yushi':  return 'pair-riku-yushi-sion';
-    // 4
     case 'jaehee-riku-sion-yushi': return 'pair-riku-yushi-jaehee-sion';
     default: return '';
   }
 }
 
-/* ---------- Demo data (fallback; replace with Supabase later) ---------- */
-const FALLBACK_PROMPTS = [
-  { id:'5',  title:'Prompt 5',
-    prompt:"Pure fluff! I have no spicy thought about this one but if this leads to something spicy, I don’t really mind.",
-    ship:'Sion,Riku, Riku,Yushi', genre:'-', characters:'Sion,Riku,Yushi', rating:'Mature', prompter:'anon'
-  },
-  { id:'4', title:'Prompt 4',
-    prompt:"Sion pikir, ditaksir sama adik temennya sendiri itu nggak mungkin, karena ya...adik temennya adiknya juga kan? Tapi ditaksir Jaehee, beyond his imagination.",
-    ship:'Sion,Jaehee', genre:'-', characters:'Sion, Jaehee', rating:'Mature', prompter:'anon'
-  },
-  { id:'19', title:'Prompt 19',
-    prompt:"Inspired by any song from reputation album and make it one,both of them a famous person (either as athlete,artist,actor etc)",
-    ship:'Sion,Riku, Sion,Jaehee, Riku,Yushi', genre:'-', characters:'Sion, Riku, Jaehee, Yushi', rating:'Mature', prompter:'anon'
-  },
-  { id:'3', title:'Prompt 3',
-    prompt:'"BFF Kulyut dan BFF Daengsyon masing-masing ngasih main dare or dare..."',
-    ship:'Sion/Jaehee, Riku/Yushi', genre:'Truth or dare', characters:'Sion, Jaehee, Riku, Yushi', rating:'Mature', prompter:'anon'
-  },
-  { id:'2', title:'Prompt 2',
-    prompt:'Setiap sore, perjalanan pulang di bus selalu sama—aku duduk di kursi dekat jendela, dia di sebelahku. Tak pernah ada kata yang keluar di antara kami, hanya kehadiran yang anehnya nyaman. Hingga suatu sore, suara isak pelan memecah kebisuan. Saat matanya yang merah bertemu denganku, aku tahu—perjalanan pulang kami tak akan pernah sama lagi.',
-    ship:'Yushi/Sion', genre:'Angst', characters:'Yushi, Sion', rating:'Explicit', prompter:'anon',
-    ao3s:['https://archiveofourown.org/collections/WishfulThoughtsFest2025/works/71557431']
-  },
-];
-
-/* ---------- State ---------- */
+/* ---------- State & data ---------- */
 const state = loadStore();
-/*
- state per id (example):
- {
-   gifts:    ["naya","sha"],
-   ao3s:     ["https://..."],
-   prompter: "anon"
- }
-*/
+let prompts = []; // filled from Supabase
 
-/* ---------- Data source (fallback to local) ---------- */
-let prompts = FALLBACK_PROMPTS;
+/* ---------- Supabase load (final, single copy) ---------- */
+async function loadFromSupabase(){
+  try {
+    if (!window.supabase) throw new Error('supabase-js not loaded');
+    if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+      throw new Error('Missing SUPABASE_URL / SUPABASE_ANON_KEY on window');
+    }
+
+    // Safari-safe: force CORS
+    const client = window.supabase.createClient(
+      window.SUPABASE_URL,
+      window.SUPABASE_ANON_KEY,
+      { global: { fetch: (url, opts) => fetch(url, { ...opts, mode: 'cors' }) } }
+    );
+
+    const sel = 'id,title,prompt,description,ship,genre,characters,rating,prompter';
+
+    // 1) count dulu biar tahu total row (tanpa data)
+    const { count, error: countErr } = await client
+      .from('prompts_public')
+      .select('*', { head: true, count: 'exact' });
+    if (countErr) throw countErr;
+    if (count == null) throw new Error('View not accessible (count=null). Check RLS / GRANT SELECT on prompts_public.');
+
+    // 2) ambil SEMUA row via range (hindari default limit 100)
+    const { data, error } = await client
+      .from('prompts_public')
+      .select(sel)
+      .range(0, Math.max(0, count - 1))
+      .order('title', { ascending: true });
+    if (error) throw error;
+    if (!Array.isArray(data) || !data.length) throw new Error('No rows returned from prompts_public');
+
+    // normalize id
+    prompts = data.map(r => ({ ...r, id: String(r.id) }));
+  } catch (err) {
+    console.error('[WFFPB] Supabase load failed:', err);
+    const grid = document.getElementById('promptGrid');
+    if (grid) {
+      grid.innerHTML = `<p style="padding:1rem">Couldn’t load prompts from Supabase.<br><b>${escapeHTML(err.message)}</b></p>`;
+    }
+    throw err;
+  }
+}
 
 /* ---------- Render ---------- */
 const grid = $('#promptGrid');
 const dlg  = $('#promptModal');
 const dlgContent = $('#modalContent');
-
-renderAll();
-bindFiltersAndShortcuts();
-setupModalRouting();  // open modal if hash present
 
 function renderAll(){
   grid.innerHTML = '';
@@ -145,26 +125,23 @@ function renderAll(){
 function renderCard(p){
   const local = state[p.id] || {};
   const gifts = local.gifts ?? [];
-  const ao3s  = local.ao3s  ?? (p.ao3s || []);
+  const ao3s  = local.ao3s  ?? [];
   const prompter = local.prompter ?? p.prompter ?? 'anon';
   const descText = p.description ?? '-';
+
+  const lead = truncateLead(p.prompt || '');
+  const hasMore = (p.prompt || '').length > lead.length;
 
   const card = document.createElement('article');
   card.className = `card ${pairClass(p.ship||'')}`;
   card.id = `prompt-${p.id}`;
   card.dataset.id = p.id;
 
-  // Title + Read more logic
-  const lead = truncateLead(p.prompt || '');
-  const hasMore = (p.prompt || '').length > lead.length;
-
   card.innerHTML = `
     <h3>${escapeHTML(p.title || `Prompt ${p.id}`)}</h3>
     ${p.prompt ? `
-      <p class="lead" data-full="${escapeHTML(p.prompt)}" data-short="${escapeHTML(lead)}">
-        ${escapeHTML(lead)}
-      </p>
-      ${hasMore ? `<button class="link-btn" data-action="toggle-full">Read more</button>`:''}
+      <p class="lead" data-full="${escapeHTML(p.prompt)}" data-short="${escapeHTML(lead)}">${escapeHTML(lead)}</p>
+      ${hasMore ? `<button class="link-btn" data-action="toggle-full">Read more</button>`:``}
     ` : ''}
 
     <div class="meta">
@@ -201,37 +178,34 @@ function renderCard(p){
     </div>
   `;
 
-  /* events */
   card.addEventListener('click', async (e)=>{
-    // Share: copy + navigate to hash (so deep-link preview works for anyone)
     const aShare = e.target.closest('a.share-a');
     if (aShare){
       e.preventDefault();
       try { await copyToClipboard(aShare.href); } catch {}
-      location.href = aShare.href;  // triggers hashchange -> modal opens
+      location.href = aShare.href; // open deep-link modal for everyone
       return;
     }
 
     const btn = e.target.closest('button[data-action]');
-    if(!btn) return;
+    if (!btn) return;
     const act = btn.dataset.action;
 
-    if (act === 'toggle-full')  return onToggleFull(card, btn);
-    if (act === 'edit-prompter')return onEditPrompter(p, card);
-    if (act === 'gift')         return onGift(p, card);
-    if (act === 'add-ao3')      return onAddAO3(p, card);
-    if (act === 'remove-gift')  return onRemoveGift(p, card, btn.dataset.name);
-    if (act === 'remove-ao3')   return onRemoveAO3(p, card, btn.dataset.url);
+    if (act === 'toggle-full')   return onToggleFull(card, btn);
+    if (act === 'edit-prompter') return onEditPrompter(p, card);
+    if (act === 'gift')          return onGift(p, card);
+    if (act === 'add-ao3')       return onAddAO3(p, card);
+    if (act === 'remove-gift')   return onRemoveGift(p, card, btn.dataset.name);
+    if (act === 'remove-ao3')    return onRemoveAO3(p, card, btn.dataset.url);
   });
 
   return card;
 }
 
-/* modal version: always full text (no Read more button) */
 function renderCardForModal(p){
   const local = state[p.id] || {};
   const gifts = local.gifts ?? [];
-  const ao3s  = local.ao3s  ?? (p.ao3s || []);
+  const ao3s  = local.ao3s  ?? [];
   const prompter = local.prompter ?? p.prompter ?? 'anon';
   const descText = p.description ?? '-';
 
@@ -275,7 +249,6 @@ function renderCardForModal(p){
     </div>
   `;
 
-  /* delegate same actions inside modal */
   wrap.addEventListener('click', async (e)=>{
     const aShare = e.target.closest('a.share-a');
     if (aShare){
@@ -288,17 +261,17 @@ function renderCardForModal(p){
     if(!btn) return;
     const act = btn.dataset.action;
 
-    if (act === 'edit-prompter')return onEditPrompter(p, wrap);
-    if (act === 'gift')         return onGift(p, wrap);
-    if (act === 'add-ao3')      return onAddAO3(p, wrap);
-    if (act === 'remove-gift')  return onRemoveGift(p, wrap, btn.dataset.name);
-    if (act === 'remove-ao3')   return onRemoveAO3(p, wrap, btn.dataset.url);
+    if (act === 'edit-prompter') return onEditPrompter(p, wrap);
+    if (act === 'gift')          return onGift(p, wrap);
+    if (act === 'add-ao3')       return onAddAO3(p, wrap);
+    if (act === 'remove-gift')   return onRemoveGift(p, wrap, btn.dataset.name);
+    if (act === 'remove-ao3')    return onRemoveAO3(p, wrap, btn.dataset.url);
   });
 
   return wrap;
 }
 
-/* ---------- Render helpers (chips) ---------- */
+/* ---------- Chip helpers ---------- */
 function renderGiftChips(list){
   return `
     <div class="chip-row">
@@ -324,19 +297,12 @@ function renderAO3Chips(list){
   `;
 }
 
-/* ---------- Card actions ---------- */
+/* ---------- Actions ---------- */
 function onToggleFull(card, btn){
   const p = $('.lead', card);
   const expanded = btn.getAttribute('data-expanded') === '1';
-  if (expanded){
-    p.textContent = p.dataset.short;
-    btn.textContent = 'Read more';
-    btn.setAttribute('data-expanded','0');
-  } else {
-    p.textContent = p.dataset.full;
-    btn.textContent = 'Read less';
-    btn.setAttribute('data-expanded','1');
-  }
+  if (expanded){ p.textContent = p.dataset.short; btn.textContent = 'Read more'; btn.setAttribute('data-expanded','0'); }
+  else { p.textContent = p.dataset.full; btn.textContent = 'Read less'; btn.setAttribute('data-expanded','1'); }
 }
 
 function onEditPrompter(p, scope){
@@ -345,53 +311,42 @@ function onEditPrompter(p, scope){
   const val = prompt('Prompter name:', current);
   if (val === null) return;
   const trimmed = val.trim() || 'anon';
-  loc.prompter = trimmed;
-  saveStore();
+  loc.prompter = trimmed; saveStore();
   $('.prompter-text', scope).textContent = trimmed;
 }
 
 function onGift(p, scope){
   const loc = state[p.id] || (state[p.id]={});
-  const who = prompt('Gift to (Twitter @ / Email):');
-  if(!who) return;
-  loc.gifts = loc.gifts || [];
-  loc.gifts.push(who.trim());
-  saveStore();
+  const who = prompt('Gift to (Twitter @ / Email):'); if(!who) return;
+  loc.gifts = loc.gifts || []; loc.gifts.push(who.trim()); saveStore();
 
-  const chipWrap = scope.querySelectorAll('.chip-row')[0];
+  const row0 = scope.querySelector('.chip-row');
   const html = renderGiftChips(loc.gifts);
-  chipWrap ? (chipWrap.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
+  row0 && row0.textContent.includes('🎁') ? (row0.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
 
-  // update count pill
   const pill = scope.querySelectorAll('.status .pill')[0];
   if (pill) pill.innerHTML = `🎁 Status: <b>Gifted ×${loc.gifts.length}</b>`;
 }
 
 function onRemoveGift(p, scope, name){
   const loc = state[p.id] || (state[p.id]={});
-  loc.gifts = (loc.gifts||[]).filter(n => n !== name);
-  saveStore();
+  loc.gifts = (loc.gifts||[]).filter(n => n !== name); saveStore();
 
-  const chipBtn = scope.querySelector(`button[data-action="remove-gift"][data-name="${CSS.escape(name)}"]`);
-  chipBtn?.parentElement?.remove();
+  const btn = scope.querySelector(`button[data-action="remove-gift"][data-name="${CSS.escape(name)}"]`);
+  btn?.parentElement?.remove();
   const pill = scope.querySelectorAll('.status .pill')[0];
   if (pill) pill.innerHTML = `🎁 Status: <b>Gifted ×${(loc.gifts||[]).length}</b>`;
 }
 
 function onAddAO3(p, scope){
   const loc = state[p.id] || (state[p.id]={});
-  const url = prompt('Paste AO3 link:');
-  if(!url) return;
-  loc.ao3s = loc.ao3s || [];
-  loc.ao3s.push(url.trim());
-  saveStore();
+  const url = prompt('Paste AO3 link:'); if(!url) return;
+  loc.ao3s = loc.ao3s || []; loc.ao3s.push(url.trim()); saveStore();
 
-  // find (or insert) the AO3 chip row
   const rows = scope.querySelectorAll('.chip-row');
   let ao3Row = null;
-  if (!rows.length) ao3Row = null;
-  else if (rows.length === 1) ao3Row = rows[0].textContent.includes('🎁') ? null : rows[0];
-  else ao3Row = rows[1];
+  if (rows.length === 1 && !rows[0].textContent.includes('🎁')) ao3Row = rows[0];
+  if (rows.length >= 2) ao3Row = rows[1];
 
   const html = renderAO3Chips(loc.ao3s);
   ao3Row ? (ao3Row.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
@@ -402,11 +357,10 @@ function onAddAO3(p, scope){
 
 function onRemoveAO3(p, scope, url){
   const loc = state[p.id] || (state[p.id]={});
-  loc.ao3s = (loc.ao3s||[]).filter(u => u !== url);
-  saveStore();
+  loc.ao3s = (loc.ao3s||[]).filter(u => u !== url); saveStore();
 
-  const chipBtn = scope.querySelector(`button[data-action="remove-ao3"][data-url="${CSS.escape(url)}"]`);
-  chipBtn?.parentElement?.remove();
+  const btn = scope.querySelector(`button[data-action="remove-ao3"][data-url="${CSS.escape(url)}"]`);
+  btn?.parentElement?.remove();
   const pill = scope.querySelectorAll('.status .pill')[1];
   if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${(loc.ao3s||[]).length}</b>`;
 }
@@ -420,18 +374,14 @@ function bindFiltersAndShortcuts(){
   $('#ratingFilter')?.addEventListener('change', applyFilters);
   $('#ao3PostedBtn')?.addEventListener('click', t=>{
     const on = t.currentTarget.getAttribute('aria-pressed') === 'true';
-    t.currentTarget.setAttribute('aria-pressed', String(!on));
-    applyFilters();
+    t.currentTarget.setAttribute('aria-pressed', String(!on)); applyFilters();
   });
 
-  // Mascot click -> set character filter (All clears it)
   $$('.mascot').forEach(img=>{
     img.addEventListener('click', ()=>{
       const who = img.getAttribute('data-char') || '';
-      const sel = $('#characterFilter');
-      if (!sel) return;
-      sel.value = who;
-      applyFilters();
+      const sel = $('#characterFilter'); if (!sel) return;
+      sel.value = who; applyFilters();
       grid.scrollIntoView({behavior:'smooth', block:'start'});
     });
   });
@@ -446,7 +396,7 @@ function applyFilters(){
   const ao3Only = $('#ao3PostedBtn')?.getAttribute('aria-pressed') === 'true';
 
   prompts.forEach(p=>{
-    const el = $(`#prompt-${p.id}`);
+    const el = $(`#prompt-${p.id}`); if (!el) return;
     const loc = state[p.id] || {};
     let ok = true;
 
@@ -458,7 +408,7 @@ function applyFilters(){
     if(genre)     ok = ok && (p.genre||'') === genre;
     if(character) ok = ok && (p.characters||'').includes(character);
     if(rating)    ok = ok && (p.rating||'') === rating;
-    if(ao3Only)   ok = ok && !!((loc.ao3s && loc.ao3s.length) || (p.ao3s && p.ao3s.length));
+    if(ao3Only)   ok = ok && !!((loc.ao3s && loc.ao3s.length));
 
     el.style.display = ok ? '' : 'none';
   });
@@ -466,18 +416,13 @@ function applyFilters(){
 
 /* ---------- Deep-link modal routing ---------- */
 function setupModalRouting(){
-  // open if current hash has a prompt id
   handleHashRoute();
-
-  // open/close on hash change
   window.addEventListener('hashchange', handleHashRoute);
 
-  // close button inside dialog
   dlg?.addEventListener('click', (e)=>{
     if (e.target.matches('[data-close]')) {
       dlg.close();
-      // clear hash but keep page position
-      history.replaceState(null, '', location.pathname + location.search);
+      history.replaceState(null,'', location.pathname + location.search);
     }
   });
 }
@@ -485,20 +430,28 @@ function setupModalRouting(){
 function handleHashRoute(){
   const id = (location.hash || '').replace('#prompt-','');
   if (!id) { dlg?.open && dlg.close(); return; }
-
-  // Ensure grid is rendered; then open the modal
-  const p = prompts.find(x => String(x.id) === String(id));
-  if (!p) return;
-
   openPromptModalById(id);
 }
 
 function openPromptModalById(id){
   const p = prompts.find(x => String(x.id) === String(id));
   if (!p) return;
-
   dlgContent.innerHTML = '';
   dlgContent.appendChild(renderCardForModal(p));
   if (typeof dlg.showModal === 'function') dlg.showModal();
-  else dlg.setAttribute('open',''); // fallback if <dialog> not supported
+  else dlg.setAttribute('open','');
 }
+
+/* ---------- Boot ---------- */
+(async function boot(){
+  try{
+    await loadFromSupabase();     // fetch rows
+    renderAll();                  // render cards
+    bindFiltersAndShortcuts();    // wire filters
+    setupModalRouting();          // enable deep-link modal
+    if (location.hash && location.hash.startsWith('#prompt-')) handleHashRoute();
+  }catch(e){
+    console.error('[WFFPB] Supabase load failed:', e);
+    grid.innerHTML = `<p style="padding:1rem">Couldn’t load prompts from Supabase. Check RLS/view and keys in HTML.</p>`;
+  }
+})();
