@@ -9,14 +9,18 @@
 <body>
   <header class="hero">
     <h1>📚 Wish Fic Fest Prompt Bank</h1>
-    <p>Browse our public library of prompts from Wish Fic Fest. You can <b>fulfill</b> or <b>gift</b> prompts. For potential authors to adopt ✨</p>
+    <p>
+      Browse our public library of prompts from Wish Fic Fest.
+      You can <b>fulfill</b> or <b>gift</b> prompts — for potential authors to adopt ✨
+    </p>
 
+    <!-- Mascots (quick character filter) -->
     <div class="mascots">
-      <img src="images/nctwish.png" class="mascot" data-char=""      alt="All"    title="All"    />
-      <img src="images/riku.png"   class="mascot" data-char="Riku"   alt="Riku"   title="Filter: Riku"/>
-      <img src="images/yushi.png"  class="mascot" data-char="Yushi"  alt="Yushi"  title="Filter: Yushi"/>
-      <img src="images/sion.png"   class="mascot" data-char="Sion"   alt="Sion"   title="Filter: Sion"/>
-      <img src="images/jaehee.png" class="mascot" data-char="Jaehee" alt="Jaehee" title="Filter: Jaehee"/>
+      <img src="images/nctwish.png" class="mascot" data-char=""      alt="All"    title="All" />
+      <img src="images/riku.png"   class="mascot" data-char="Riku"   alt="Riku"   title="Filter: Riku" />
+      <img src="images/yushi.png"  class="mascot" data-char="Yushi"  alt="Yushi"  title="Filter: Yushi" />
+      <img src="images/sion.png"   class="mascot" data-char="Sion"   alt="Sion"   title="Filter: Sion" />
+      <img src="images/jaehee.png" class="mascot" data-char="Jaehee" alt="Jaehee" title="Filter: Jaehee" />
     </div>
   </header>
 
@@ -56,12 +60,22 @@
 
   <footer class="footer">✨ Powered by Wish Fic Fest ✨</footer>
 
-  <!-- Supabase client (optional; page still works without it) -->
+  <!-- Full Prompt Modal -->
+  <dialog id="promptModal" class="modal">
+    <div class="modal-inner">
+      <button class="modal-close" data-close>✖</button>
+      <div id="modalContent"></div>
+    </div>
+  </dialog>
+
+  <!-- (Optional) Supabase client; page works without it -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script>
+    // Keep here so you can wire Supabase later
     window.SUPABASE_URL      = "https://vkeisxxfexnsuwqqmduw.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrZWlzeHhmZXhuc3V3cXFtZHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzODc3NjUsImV4cCI6MjA3NDk2Mzc2NX0.crOPV9tLVw6ruDWPBfS1XDvc3oJDq5_9dGquD2KCBeI";
   </script>
+
   <script src="app.js"></script>
 </body>
 </html>
