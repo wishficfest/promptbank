@@ -1,11 +1,16 @@
 /* ===============================
    Wish Fic Fest Prompt Bank — JS
-   Patch: restore Read more + remove Description editing
-   Keep: share-link auto-copy, gifts/ao3 multi, prompter edit, filters, pairing colors
+   - Multi gift & AO3 links (+ remove)
+   - Edit Prompter only
+   - Read more on cards
+   - Pairing color outlines
+   - Filters + Mascot shortcuts
+   - Share: copy link AND navigate to #prompt-<id>
+   - Deep-link modal: open full prompt from hash
    =============================== */
 
 /* ---------- Helpers ---------- */
-const STORE_KEY = 'wffpb:v5';
+const STORE_KEY = 'wffpb:v6';
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 
@@ -52,7 +57,7 @@ function truncateLead(text, max=180){
   return t.slice(0, max).replace(/\s+\S*$/, '') + '…';
 }
 
-/* outline color by ship (maps to CSS classes you already have) */
+/* outline color by ship (maps to your CSS pairing classes) */
 function pairClass(shipRaw){
   const s = (shipRaw||'').toLowerCase();
   const set = new Set(
@@ -60,8 +65,7 @@ function pairClass(shipRaw){
      .split(/[,\s/]+/)
      .filter(Boolean)
   );
-  const has = n => set.has(n);
-  const who = ['riku','yushi','sion','jaehee'].filter(has);
+  const who = ['riku','yushi','sion','jaehee'].filter(n => set.has(n));
   if (!who.length) return '';
   const key = who.sort().join('-'); // alphabetical
 
@@ -84,7 +88,7 @@ function pairClass(shipRaw){
   }
 }
 
-/* ---------- Demo data (fallback bila belum ambil dari DB) ---------- */
+/* ---------- Demo data (fallback; replace with Supabase later) ---------- */
 const FALLBACK_PROMPTS = [
   { id:'5',  title:'Prompt 5',
     prompt:"Pure fluff! I have no spicy thought about this one but if this leads to something spicy, I don’t really mind.",
@@ -112,12 +116,11 @@ const FALLBACK_PROMPTS = [
 /* ---------- State ---------- */
 const state = loadStore();
 /*
- state shape per id:
+ state per id (example):
  {
-   gifts: [ "name", ... ],
-   ao3s:  [ "url", ... ],
-   prompter: "name",
-   // description (jika sudah tersimpan sebelumnya) dipakai, tp tdk bisa diedit lagi
+   gifts:    ["naya","sha"],
+   ao3s:     ["https://..."],
+   prompter: "anon"
  }
 */
 
@@ -126,8 +129,12 @@ let prompts = FALLBACK_PROMPTS;
 
 /* ---------- Render ---------- */
 const grid = $('#promptGrid');
+const dlg  = $('#promptModal');
+const dlgContent = $('#modalContent');
+
 renderAll();
 bindFiltersAndShortcuts();
+setupModalRouting();  // open modal if hash present
 
 function renderAll(){
   grid.innerHTML = '';
@@ -140,7 +147,7 @@ function renderCard(p){
   const gifts = local.gifts ?? [];
   const ao3s  = local.ao3s  ?? (p.ao3s || []);
   const prompter = local.prompter ?? p.prompter ?? 'anon';
-  const descText = local.description ?? p.description ?? '-';
+  const descText = p.description ?? '-';
 
   const card = document.createElement('article');
   card.className = `card ${pairClass(p.ship||'')}`;
@@ -196,11 +203,12 @@ function renderCard(p){
 
   /* events */
   card.addEventListener('click', async (e)=>{
-    // Share: auto copy
+    // Share: copy + navigate to hash (so deep-link preview works for anyone)
     const aShare = e.target.closest('a.share-a');
     if (aShare){
       e.preventDefault();
       try { await copyToClipboard(aShare.href); } catch {}
+      location.href = aShare.href;  // triggers hashchange -> modal opens
       return;
     }
 
@@ -217,6 +225,77 @@ function renderCard(p){
   });
 
   return card;
+}
+
+/* modal version: always full text (no Read more button) */
+function renderCardForModal(p){
+  const local = state[p.id] || {};
+  const gifts = local.gifts ?? [];
+  const ao3s  = local.ao3s  ?? (p.ao3s || []);
+  const prompter = local.prompter ?? p.prompter ?? 'anon';
+  const descText = p.description ?? '-';
+
+  const wrap = document.createElement('article');
+  wrap.className = `card ${pairClass(p.ship||'')}`;
+  wrap.innerHTML = `
+    <h3>${escapeHTML(p.title || `Prompt ${p.id}`)}</h3>
+    ${p.prompt ? `<p class="lead">${escapeHTML(p.prompt)}</p>` : ''}
+
+    <div class="meta">
+      ${row('Description', escapeHTML(descText))}
+      ${row('Ship',        escapeHTML(p.ship||'-'))}
+      ${row('Genre',       escapeHTML(p.genre||'-'))}
+      ${row('Characters',  escapeHTML(p.characters||'-'))}
+      ${row('Rating',      escapeHTML(p.rating||'-'))}
+      <div class="meta-row">
+        <b>Prompter</b>
+        <span>
+          <span class="prompter-text">${escapeHTML(prompter)}</span>
+          <button class="chip chip-link" data-action="edit-prompter">✏️ Edit</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="status">
+      <span class="pill">🎁 Status: <b>Gifted ×${gifts.length}</b></span>
+      <span class="pill">📖 AO3: <b>Links ×${ao3s.length}</b></span>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-green" data-action="gift">🎁 Add Gift</button>
+      <button class="btn btn-blue"  data-action="add-ao3">📚 Add AO3</button>
+    </div>
+
+    ${gifts.length ? renderGiftChips(gifts) : ''}
+    ${ao3s.length   ? renderAO3Chips(ao3s)   : ''}
+
+    <div class="share-line">
+      <span>🔗 Share:</span>
+      <a class="share-a" href="${shareURL(p.id)}" data-id="${p.id}">link</a>
+    </div>
+  `;
+
+  /* delegate same actions inside modal */
+  wrap.addEventListener('click', async (e)=>{
+    const aShare = e.target.closest('a.share-a');
+    if (aShare){
+      e.preventDefault();
+      try { await copyToClipboard(aShare.href); } catch {}
+      location.href = aShare.href;
+      return;
+    }
+    const btn = e.target.closest('button[data-action]');
+    if(!btn) return;
+    const act = btn.dataset.action;
+
+    if (act === 'edit-prompter')return onEditPrompter(p, wrap);
+    if (act === 'gift')         return onGift(p, wrap);
+    if (act === 'add-ao3')      return onAddAO3(p, wrap);
+    if (act === 'remove-gift')  return onRemoveGift(p, wrap, btn.dataset.name);
+    if (act === 'remove-ao3')   return onRemoveAO3(p, wrap, btn.dataset.url);
+  });
+
+  return wrap;
 }
 
 /* ---------- Render helpers (chips) ---------- */
@@ -245,7 +324,7 @@ function renderAO3Chips(list){
   `;
 }
 
-/* ---------- Actions ---------- */
+/* ---------- Card actions ---------- */
 function onToggleFull(card, btn){
   const p = $('.lead', card);
   const expanded = btn.getAttribute('data-expanded') === '1';
@@ -260,7 +339,7 @@ function onToggleFull(card, btn){
   }
 }
 
-function onEditPrompter(p, card){
+function onEditPrompter(p, scope){
   const loc = state[p.id] || (state[p.id]={});
   const current = loc.prompter ?? p.prompter ?? 'anon';
   const val = prompt('Prompter name:', current);
@@ -268,10 +347,10 @@ function onEditPrompter(p, card){
   const trimmed = val.trim() || 'anon';
   loc.prompter = trimmed;
   saveStore();
-  $('.prompter-text', card).textContent = trimmed;
+  $('.prompter-text', scope).textContent = trimmed;
 }
 
-function onGift(p, card){
+function onGift(p, scope){
   const loc = state[p.id] || (state[p.id]={});
   const who = prompt('Gift to (Twitter @ / Email):');
   if(!who) return;
@@ -279,23 +358,27 @@ function onGift(p, card){
   loc.gifts.push(who.trim());
   saveStore();
 
-  // re-render chips + count
-  const giftRow = card.querySelector('.chip-row');
-  if (giftRow) giftRow.outerHTML = renderGiftChips(loc.gifts);
-  else card.insertAdjacentHTML('beforeend', renderGiftChips(loc.gifts));
-  $('.status .pill', card).innerHTML = `🎁 Status: <b>Gifted ×${loc.gifts.length}</b>`;
+  const chipWrap = scope.querySelectorAll('.chip-row')[0];
+  const html = renderGiftChips(loc.gifts);
+  chipWrap ? (chipWrap.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
+
+  // update count pill
+  const pill = scope.querySelectorAll('.status .pill')[0];
+  if (pill) pill.innerHTML = `🎁 Status: <b>Gifted ×${loc.gifts.length}</b>`;
 }
 
-function onRemoveGift(p, card, name){
+function onRemoveGift(p, scope, name){
   const loc = state[p.id] || (state[p.id]={});
   loc.gifts = (loc.gifts||[]).filter(n => n !== name);
   saveStore();
-  const chipBtn = card.querySelector(`button[data-action="remove-gift"][data-name="${CSS.escape(name)}"]`);
+
+  const chipBtn = scope.querySelector(`button[data-action="remove-gift"][data-name="${CSS.escape(name)}"]`);
   chipBtn?.parentElement?.remove();
-  $('.status .pill', card).innerHTML = `🎁 Status: <b>Gifted ×${(loc.gifts||[]).length}</b>`;
+  const pill = scope.querySelectorAll('.status .pill')[0];
+  if (pill) pill.innerHTML = `🎁 Status: <b>Gifted ×${(loc.gifts||[]).length}</b>`;
 }
 
-function onAddAO3(p, card){
+function onAddAO3(p, scope){
   const loc = state[p.id] || (state[p.id]={});
   const url = prompt('Paste AO3 link:');
   if(!url) return;
@@ -303,25 +386,32 @@ function onAddAO3(p, card){
   loc.ao3s.push(url.trim());
   saveStore();
 
-  const rows = card.querySelectorAll('.chip-row');
-  const ao3RowExisting = rows.length === 2 ? rows[1] : (rows.length === 1 && rows[0].textContent.includes('🎁') ? null : rows[0]);
-  if (ao3RowExisting) ao3RowExisting.outerHTML = renderAO3Chips(loc.ao3s);
-  else card.insertAdjacentHTML('beforeend', renderAO3Chips(loc.ao3s));
+  // find (or insert) the AO3 chip row
+  const rows = scope.querySelectorAll('.chip-row');
+  let ao3Row = null;
+  if (!rows.length) ao3Row = null;
+  else if (rows.length === 1) ao3Row = rows[0].textContent.includes('🎁') ? null : rows[0];
+  else ao3Row = rows[1];
 
-  card.querySelectorAll('.status .pill')[1].innerHTML = `📖 AO3: <b>Links ×${loc.ao3s.length}</b>`;
+  const html = renderAO3Chips(loc.ao3s);
+  ao3Row ? (ao3Row.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
+
+  const pill = scope.querySelectorAll('.status .pill')[1];
+  if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${loc.ao3s.length}</b>`;
 }
 
-function onRemoveAO3(p, card, url){
+function onRemoveAO3(p, scope, url){
   const loc = state[p.id] || (state[p.id]={});
   loc.ao3s = (loc.ao3s||[]).filter(u => u !== url);
   saveStore();
 
-  const chipBtn = card.querySelector(`button[data-action="remove-ao3"][data-url="${CSS.escape(url)}"]`);
+  const chipBtn = scope.querySelector(`button[data-action="remove-ao3"][data-url="${CSS.escape(url)}"]`);
   chipBtn?.parentElement?.remove();
-  card.querySelectorAll('.status .pill')[1].innerHTML = `📖 AO3: <b>Links ×${(loc.ao3s||[]).length}</b>`;
+  const pill = scope.querySelectorAll('.status .pill')[1];
+  if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${(loc.ao3s||[]).length}</b>`;
 }
 
-/* ---------- Filters (unchanged) ---------- */
+/* ---------- Filters & mascot shortcuts ---------- */
 function bindFiltersAndShortcuts(){
   $('#searchBar')?.addEventListener('input', applyFilters);
   $('#shipFilter')?.addEventListener('change', applyFilters);
@@ -334,11 +424,10 @@ function bindFiltersAndShortcuts(){
     applyFilters();
   });
 
-  // mascot shortcuts -> filter by character
+  // Mascot click -> set character filter (All clears it)
   $$('.mascot').forEach(img=>{
     img.addEventListener('click', ()=>{
-      const who = img.alt?.trim();
-      if(!who) return;
+      const who = img.getAttribute('data-char') || '';
       const sel = $('#characterFilter');
       if (!sel) return;
       sel.value = who;
@@ -373,4 +462,43 @@ function applyFilters(){
 
     el.style.display = ok ? '' : 'none';
   });
+}
+
+/* ---------- Deep-link modal routing ---------- */
+function setupModalRouting(){
+  // open if current hash has a prompt id
+  handleHashRoute();
+
+  // open/close on hash change
+  window.addEventListener('hashchange', handleHashRoute);
+
+  // close button inside dialog
+  dlg?.addEventListener('click', (e)=>{
+    if (e.target.matches('[data-close]')) {
+      dlg.close();
+      // clear hash but keep page position
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  });
+}
+
+function handleHashRoute(){
+  const id = (location.hash || '').replace('#prompt-','');
+  if (!id) { dlg?.open && dlg.close(); return; }
+
+  // Ensure grid is rendered; then open the modal
+  const p = prompts.find(x => String(x.id) === String(id));
+  if (!p) return;
+
+  openPromptModalById(id);
+}
+
+function openPromptModalById(id){
+  const p = prompts.find(x => String(x.id) === String(id));
+  if (!p) return;
+
+  dlgContent.innerHTML = '';
+  dlgContent.appendChild(renderCardForModal(p));
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open',''); // fallback if <dialog> not supported
 }
