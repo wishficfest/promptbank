@@ -147,10 +147,7 @@ function renderCard(p){
       ${row('Rating',      escapeHTML(p.rating||'-'))}
       <div class="meta-row">
         <b>Prompter</b>
-        <span>
-          <span class="prompter-text">${escapeHTML(prompter)}</span>
-          <button class="chip chip-link" data-action="edit-prompter">✏️ Edit</button>
-        </span>
+        <span class="prompter-text">${escapeHTML(prompter)}</span>
       </div>
     </div>
 
@@ -187,7 +184,6 @@ function renderCard(p){
     const act = btn.dataset.action;
 
     if (act === 'toggle-full')   return onToggleFull(card, btn);
-    if (act === 'edit-prompter') return onEditPrompter(p, card);
     if (act === 'gift')          return onGift(p, card);
     if (act === 'add-ao3')       return onAddAO3(p, card);
     if (act === 'remove-gift')   return onRemoveGift(p, card, btn.dataset.name);
@@ -218,10 +214,7 @@ function renderCardForModal(p){
       ${row('Rating',      escapeHTML(p.rating||'-'))}
       <div class="meta-row">
         <b>Prompter</b>
-        <span>
-          <span class="prompter-text">${escapeHTML(prompter)}</span>
-          <button class="chip chip-link" data-action="edit-prompter">✏️ Edit</button>
-        </span>
+        <span class="prompter-text">${escapeHTML(prompter)}</span>
       </div>
     </div>
 
@@ -256,7 +249,6 @@ function renderCardForModal(p){
     if(!btn) return;
     const act = btn.dataset.action;
 
-    if (act === 'edit-prompter') return onEditPrompter(p, wrap);
     if (act === 'gift')          return onGift(p, wrap);
     if (act === 'add-ao3')       return onAddAO3(p, wrap);
     if (act === 'remove-gift')   return onRemoveGift(p, wrap, btn.dataset.name);
@@ -298,16 +290,6 @@ function onToggleFull(card, btn){
   const expanded = btn.getAttribute('data-expanded') === '1';
   if (expanded){ p.textContent = p.dataset.short; btn.textContent = 'Read more'; btn.setAttribute('data-expanded','0'); }
   else { p.textContent = p.dataset.full; btn.textContent = 'Read less'; btn.setAttribute('data-expanded','1'); }
-}
-
-function onEditPrompter(p, scope){
-  const loc = state[p.id] || (state[p.id]={});
-  const current = loc.prompter ?? p.prompter ?? 'anon';
-  const val = prompt('Prompter name:', current);
-  if (val === null) return;
-  const trimmed = val.trim() || 'anon';
-  loc.prompter = trimmed; saveStore();
-  $('.prompter-text', scope).textContent = trimmed;
 }
 
 function onGift(p, scope){
