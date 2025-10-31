@@ -15,13 +15,13 @@ function ensureSB(){
   if (sb) return sb;
   if (!window.supabase) throw new Error("Supabase JS not loaded");
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  window.sb = sb; // expose for console helpers
+  window.sb = sb;
   return sb;
 }
 
 /* ---------- State ---------- */
-let PROMPTS = [];      // rows from prompts_public
-let WRITE_MAP = {};    // { prompt_id: [ {id,author,ao3_url,created_at}, ... ] }
+let PROMPTS = [];
+let WRITE_MAP = {};
 
 /* ---------- Small helpers ---------- */
 const $  = (s, r=document) => r.querySelector(s);
@@ -29,11 +29,10 @@ const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 const S  = (v) => (v ?? "").toString();
 
 function escapeHTML(s){
-  return S(s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  return S(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+             .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
-function toast(msg, kind="ok", ms=2800){
+function toast(msg, kind="ok", ms=2600){
   let w=$("#toastWrap");
   if(!w){
     w=document.createElement("div");
@@ -73,7 +72,6 @@ async function loadAll(limit=400){
   if(e2) throw e2;
 
   PROMPTS = prompts || [];
-
   WRITE_MAP = {};
   (writings || []).forEach(w=>{
     (WRITE_MAP[w.prompt_id] ||= []).push(w);
@@ -84,19 +82,24 @@ async function loadAll(limit=400){
 function getWritings(pid){ return WRITE_MAP[pid] || []; }
 function hasAo3(pid){ return getWritings(pid).some(w => !!w.ao3_url); }
 
-/* ---------- Pair color class ---------- */
+/* ---------- Ship parsing ---------- */
+const SEP_RE = /[\/,×]|\s+x\s+/gi;
+function normTokens(s){
+  return (s ?? "")
+    .toLowerCase()
+    .split(SEP_RE)
+    .map(x=>x.trim())
+    .filter(Boolean)
+    .map(x => ({ riku:"riku", yushi:"yushi", sion:"sion", jaehee:"jaehee" }[x] || x));
+}
 const KNOWN = new Set([
   "riku-yushi","riku-sion","riku-jaehee","yushi-sion","yushi-jaehee","sion-jaehee",
   "riku-yushi-jaehee","riku-yushi-sion","riku-jaehee-sion","yushi-jaehee-sion",
   "riku-yushi-jaehee-sion"
 ]);
-function normTokens(s){
-  return S(s).toLowerCase()
-    .split(/[\/,]/).map(x=>x.trim()).filter(Boolean)
-    .map(x => ({ riku:"riku", yushi:"yushi", sion:"sion", jaehee:"jaehee" }[x] || x));
-}
 function choosePairKey(ship){
   const t = Array.from(new Set(normTokens(ship))).sort();
+  if(!t.length) return null;
   if(t.length>=4){ const k=t.slice(0,4).join("-"); if(KNOWN.has(k)) return k; }
   if(t.length>=3){
     for(let i=0;i<t.length;i++)
@@ -107,7 +110,7 @@ function choosePairKey(ship){
         }
   }
   if(t.length>=2){
-    const k = [t[0], t[1]].join("-");
+    const k=[t[0],t[1]].join("-");
     if(KNOWN.has(k)) return k;
     for(let i=0;i<t.length;i++)
       for(let j=i+1;j<t.length;j++){
@@ -117,10 +120,51 @@ function choosePairKey(ship){
   }
   return null;
 }
+
+/* ======== Color engine (fixed) ======== */
+const PALETTE = [
+  "#3b82f6","#f472b6","#22c55e","#f59e0b","#a78bfa","#06b6d4",
+  "#ef4444","#10b981","#8b5cf6","#0ea5e9","#e11d48","#2563eb",
+  "#84cc16","#fb7185","#f97316","#14b8a6","#9333ea","#4f46e5"
+];
+const SOLO_COLORS = {
+  riku:"#4098ff", yushi:"#4098ff",   // BLUE
+  sion:"#ff5fa2", jaehee:"#ff5fa2"   // PINK
+};
+const PAIR_COLORS = {
+  "riku-yushi":"#218BB8",           // blue pair
+  "yushi-sion":"#4098ff",
+  "riku-sion":"#17a2a4",
+  "yushi-jaehee":"#ff5fa2",
+  "riku-jaehee":"#a06ce2",
+  "sion-jaehee":"#22c55e",
+  "riku-yushi-sion":"#f59e0b",
+  "riku-yushi-jaehee":"#6366f1",
+  "riku-jaehee-sion":"#9b59b6",
+  "yushi-jaehee-sion":"#00bcd4",
+  "riku-yushi-jaehee-sion":"#f43f5e"
+};
+function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h<<5)-h+s.charCodeAt(i); h|=0; } return Math.abs(h); }
+function colorFromHash(s){ return PALETTE[hashStr(s||"wish")%PALETTE.length]; }
+function colorForShip(ship){
+  const tokens = normTokens(ship);
+  const key = choosePairKey(ship);
+  if (key && PAIR_COLORS[key]) return PAIR_COLORS[key];
+
+  if (tokens.length === 1 && SOLO_COLORS[tokens[0]]) return SOLO_COLORS[tokens[0]];
+
+  const hasBlue = tokens.some(t => t==="riku" || t==="yushi");
+  const hasPink = tokens.some(t => t==="sion" || t==="jaehee");
+  if (hasBlue && !hasPink) return "#4098ff";
+  if (hasPink && !hasBlue) return "#ff5fa2";
+
+  return colorFromHash(String(ship));
+}
 function applyPairClass(el, ship){
   if (!el) return;
+  el.style.setProperty("--pair", colorForShip(ship || ""));
   const key = choosePairKey(ship || "");
-  if(key) el.classList.add(`pair-${key}`);
+  if (key) el.classList.add(`pair-${key}`);
 }
 
 /* ---------- Chips renderer ---------- */
@@ -152,11 +196,10 @@ function renderCard(p){
   const full  = S(p.prompt);
   const short = full.length > 170 ? full.slice(0,165) + "…" : full;
   const hasMore = full.length > short.length;
-
   const ao3Count = getWritings(p.id).filter(w=>!!w.ao3_url).length;
 
   card.innerHTML = `
-    <h3>${escapeHTML(p.title || "Prompt")}</h3>
+    <div class="card-head"><h3>${escapeHTML(p.title || "Prompt")}</h3></div>
     ${full ? `
       <p class="prompt-text lead" data-full="${escapeHTML(full)}" data-short="${escapeHTML(short)}">${escapeHTML(short)}</p>
       ${hasMore ? `<button class="link-btn" data-action="toggle-full">Read more</button>` : ``}
@@ -243,7 +286,6 @@ async function copyAndPreview(id){
   history.pushState(null, "", `?p=${encodeURIComponent(id)}`);
   openPreview(id);
 }
-
 function getParam(name){ return new URLSearchParams(location.search).get(name); }
 
 function ensurePreviewHost(){
@@ -259,56 +301,11 @@ function ensurePreviewHost(){
   return host;
 }
 
-/* --- preview tint styles (override inline bg) --- */
-function ensurePreviewTintStyles(){
-  if (document.getElementById("pvTintStyles")) return;
-
-  const css = `
-  .preview-card{ border-color:#e5e5e5; }
-
-  .preview-card.pair-riku-yushi{ border-color: var(--c-riku-yushi) !important; }
-  .preview-card.pair-riku-sion{ border-color: var(--c-riku-sion) !important; }
-  .preview-card.pair-riku-jaehee{ border-color: var(--c-riku-jaehee) !important; }
-  .preview-card.pair-yushi-sion{ border-color: var(--c-yushi-sion) !important; }
-  .preview-card.pair-yushi-jaehee{ border-color: var(--c-yushi-jaehee) !important; }
-  .preview-card.pair-sion-jaehee{ border-color: var(--c-sion-jaehee) !important; }
-  .preview-card.pair-riku-yushi-jaehee{ border-color: var(--c-riku-yushi-jaehee) !important; }
-  .preview-card.pair-riku-yushi-sion{ border-color: var(--c-riku-yushi-sion) !important; }
-  .preview-card.pair-riku-jaehee-sion{ border-color: var(--c-riku-jaehee-sion) !important; }
-  .preview-card.pair-yushi-jaehee-sion{ border-color: var(--c-yushi-jaehee-sion) !important; }
-  .preview-card.pair-riku-yushi-jaehee-sion{ border-color: var(--c-riku-yushi-jaehee-sion) !important; }
-
-  .preview-card .pv-head{ color:#111; } /* default */
-  .preview-card.pair-riku-yushi   .pv-head{ background: var(--c-riku-yushi)   !important; color:#fff !important; }
-  .preview-card.pair-riku-sion    .pv-head{ background: var(--c-riku-sion)    !important; color:#fff !important; }
-  .preview-card.pair-riku-jaehee  .pv-head{ background: var(--c-riku-jaehee)  !important; color:#fff !important; }
-  .preview-card.pair-yushi-sion   .pv-head{ background: var(--c-yushi-sion)   !important; color:#fff !important; }
-  .preview-card.pair-yushi-jaehee .pv-head{ background: var(--c-yushi-jaehee) !important; color:#fff !important; }
-  .preview-card.pair-sion-jaehee  .pv-head{ background: var(--c-sion-jaehee)  !important; color:#fff !important; }
-  .preview-card.pair-riku-yushi-jaehee .pv-head{ background: var(--c-riku-yushi-jaehee) !important; color:#fff !important; }
-  .preview-card.pair-riku-yushi-sion   .pv-head{ background: var(--c-riku-yushi-sion)   !important; color:#fff !important; }
-  .preview-card.pair-riku-jaehee-sion  .pv-head{ background: var(--c-riku-jaehee-sion)  !important; color:#fff !important; }
-  .preview-card.pair-yushi-jaehee-sion .pv-head{ background: var(--c-yushi-jaehee-sion) !important; color:#fff !important; }
-  .preview-card.pair-riku-yushi-jaehee-sion .pv-head{ background: var(--c-riku-yushi-jaehee-sion) !important; color:#fff !important; }
-
-  .preview-card .pv-head .btn{ background:#fff; color:#111; border:1px solid rgba(0,0,0,.15); }
-  `;
-  const style = document.createElement("style");
-  style.id = "pvTintStyles";
-  style.textContent = css;
-  document.head.appendChild(style);
-}
-
 function buildPreviewHTML(p){
   const links = getWritings(p.id).filter(w => !!w.ao3_url);
   return `
-    <div class="preview-card" role="dialog" aria-modal="true" style="
-      pointer-events:auto;
-      max-width:760px;width:calc(100% - 24px);
-      margin:12px auto;
-      background:#fff; border:1px solid #e5e5e5; border-radius:14px;
-      box-shadow:0 18px 50px rgba(0,0,0,.18); overflow:hidden">
-      <div class="pv-head" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #eee;background:#fafafa">
+    <div class="preview-card" role="dialog" aria-modal="true" style="pointer-events:auto;margin:12px auto;overflow:hidden">
+      <div class="pv-head" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.05)">
         <strong style="font-size:16px">Preview — ${escapeHTML(p.title ? `Prompt ${p.title}` : "Prompt")}</strong>
         <div style="margin-left:auto;display:flex;gap:8px">
           <button data-pv="copy" class="btn">Copy link</button>
@@ -336,15 +333,11 @@ function openPreview(id){
   const p = PROMPTS.find(x => x.id === id);
   if (!p){ toast("Prompt not found","err"); return; }
 
-  ensurePreviewTintStyles();
-
   const host = ensurePreviewHost();
   host.innerHTML = buildPreviewHTML(p);
 
-  const pv   = host.querySelector(".preview-card");
-  const head = host.querySelector(".pv-head");
-  applyPairClass(pv,   p.ship);   // tint card border
-  applyPairClass(head, p.ship);   // tint header bg
+  const pv = host.querySelector(".preview-card");
+  applyPairClass(pv, p.ship);
 
   const close = ()=>{ host.innerHTML = ""; history.replaceState(null,"",location.pathname + location.hash); };
   host.querySelector('[data-pv="close"]').addEventListener("click", close);
@@ -366,18 +359,14 @@ function openPreview(id){
 
 /* ---------- Filters ---------- */
 function norm(s){ return S(s).toLowerCase().replace(/\s+/g,' ').trim(); }
-function splitNames(s){ return norm(s).split(/[\/,]/).map(x=>x.trim()).filter(Boolean); }
-
+function splitNames(s){ return norm(s).split(SEP_RE).map(x=>x.trim()).filter(Boolean); }
 function shipMatches(pship, selected){
   const need = splitNames(selected);
   if(!need.length) return true;
   const hay = splitNames(pship);
   return need.every(n => hay.includes(n));
 }
-function contains(field, q){
-  if(!q) return true;
-  return norm(field).includes(norm(q));
-}
+function contains(field, q){ if(!q) return true; return norm(field).includes(norm(q)); }
 function matchesSearch(p, q){
   if(!q) return true;
   const hay = [p.title, p.prompt, p.description, p.ship, p.genre, p.characters, p.rating, p.prompter]
@@ -398,7 +387,6 @@ function applyFilters(){
   const ao3Mode = ao3Btn && ao3Btn.getAttribute("aria-pressed")==="true" ? "has" : "all";
 
   let rows = PROMPTS.slice();
-
   if (ao3Mode === "has") rows = rows.filter(p => hasAo3(p.id));
   rows = rows.filter(p => matchesSearch(p, q));
   rows = rows.filter(p => shipMatches(p.ship || "", fShip));
@@ -452,29 +440,25 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   }
 });
 
-/* ---------- Public helpers used elsewhere ---------- */
+/* ---------- Public helpers ---------- */
 async function addAo3Written(promptId) {
   const author = prompt('Author?'); if (!author) return;
   const ao3    = prompt('AO3 URL?'); if (!ao3) return;
 
   ensureSB();
-  const { error } = await sb
-    .from('prompt_writings')
+  const { error } = await sb.from('prompt_writings')
     .insert([{ prompt_id: promptId, author, ao3_url: ao3 }]);
 
   if (error) { alert('Gagal: ' + (error.message || 'Unknown')); return; }
   await refreshOneCard(promptId);
 }
-
 async function saveAnnotations(promptId, { ao3_links, prompter_override }) {
   ensureSB();
   const payload = { prompt_id: promptId, ao3_links, prompter_override };
-  const { error } = await sb
-    .from('prompt_annotations')
+  const { error } = await sb.from('prompt_annotations')
     .upsert(payload, { onConflict: 'prompt_id' });
   if (error) alert('Gagal simpan annotation: ' + error.message);
 }
-
 async function refreshOneCard(promptId) {
   const list = LIST(); if (!list) return;
   const old = list.querySelector(`[data-id="${CSS.escape(promptId)}"]`);
@@ -486,7 +470,7 @@ async function refreshOneCard(promptId) {
       .eq("prompt_id", promptId)
       .order("created_at", { ascending: true });
     WRITE_MAP[promptId] = data || [];
-  }catch(e){ /* ignore */ }
+  }catch(e){}
 
   const p = PROMPTS.find(x => x.id === promptId);
   if (!p) return;
@@ -494,7 +478,7 @@ async function refreshOneCard(promptId) {
   old.replaceWith(fresh);
 }
 
-/* ---------- Internal AO3 actions for buttons ---------- */
+/* ---------- Internal AO3 actions ---------- */
 async function onAddAo3Written(promptId){
   const authorRaw = prompt("Author name / handle:");
   if (!authorRaw) return;
@@ -516,7 +500,6 @@ async function onAddAo3Written(promptId){
   (WRITE_MAP[promptId] ||= []).push(data);
   toast("AO3 Written-by added ✅", "ok");
 }
-
 async function onRemoveAo3Written(writingId, promptId){
   ensureSB();
   const { error } = await sb.from("prompt_writings").delete().eq("id", writingId);
