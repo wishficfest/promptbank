@@ -1,168 +1,181 @@
-/* ===============================
-   Wish Fic Fest Prompt Bank — JS
-   Supabase-only data source
-   =============================== */
 
-/* ---------- Helpers ---------- */
-const STORE_KEY = 'wffpb:v7';
+/* ---------- Config ---------- */
+const SUPABASE_URL      = window.SUPABASE_URL      || "https://vkeisxxfexnsuwqqmduw.supabase.co";
+const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrZWlzeHhmZXhuc3V3cXFtZHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzODc3NjUsImV4cCI6MjA3NDk2Mzc2NX0.crOPV9tLVw6ruDWPBfS1XDvc3oJDq5_9dGquD2KCBeI";
+const LIST = () => document.querySelector("#promptGrid") || document.querySelector(".prompt-list");
+
+/* ---------- Supabase ---------- */
+let sb = null;
+function ensureSB(){
+  if (sb) return sb;
+  if (!window.supabase) throw new Error("Supabase JS not loaded");
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return sb;
+}
+
+/* ---------- State ---------- */
+let PROMPTS = [];      // rows from prompts_public
+let WRITE_MAP = {};    // { prompt_id: [ {id,author,ao3_url,created_at}, ... ] }
+
+/* ---------- Small helpers ---------- */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const S  = (v) => (v ?? "").toString();
 
-function loadStore(){ try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
-function saveStore(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function escapeHTML(s){
+  return S(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+function toast(msg, kind="ok", ms=2800){
+  let w=$("#toastWrap");
+  if(!w){
+    w=document.createElement("div");
+    Object.assign(w.style,{position:"fixed",right:"16px",bottom:"16px",display:"flex",gap:"8px",zIndex:"9999",flexDirection:"column"});
+    w.id="toastWrap"; document.body.appendChild(w);
+  }
+  const t=document.createElement("div");
+  Object.assign(t.style,{padding:"10px 12px",borderRadius:"10px",border:"1px solid rgba(0,0,0,.08)",boxShadow:"0 2px 8px rgba(0,0,0,.12)",maxWidth:"420px",fontSize:"13px"});
+  t.style.background = kind==="ok" ? "#d1e7dd" : "#f8d7da";
+  t.style.color      = kind==="ok" ? "#0f5132" : "#842029";
+  t.textContent = msg; w.appendChild(t); setTimeout(()=>t.remove(), ms);
+}
+function toErr(err){
+  if(!err) return "Unknown error";
+  if(typeof err === "string") return err;
+  const p=[]; if(err.message) p.push(err.message); if(err.details) p.push(err.details); if(err.hint) p.push(err.hint); if(err.code) p.push(`[${err.code}]`);
+  try{ return p.join(" — ") || JSON.stringify(err);}catch{ return String(err);}
+}
 
-function copyToClipboard(text){
-  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
-  return new Promise((resolve, reject)=>{
-    try{
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.setAttribute('readonly',''); ta.style.position='absolute'; ta.style.left='-9999px';
-      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, ta.value.length);
-      const ok = document.execCommand('copy'); document.body.removeChild(ta);
-      ok ? resolve() : reject(new Error('copy failed'));
-    }catch(e){ reject(e); }
+function row(k,v){ return `<div class="meta-row"><b>${escapeHTML(k)}</b><span>${escapeHTML(v)}</span></div>`; }
+function shareURL(id){ return `#prompt-${encodeURIComponent(id)}`; }
+function renderEmpty(reason=""){
+  const el=LIST(); if(!el) return; el.innerHTML = `<div class="empty"><div>No prompts to show.</div>${reason?`<div class="empty-reason">${escapeHTML(reason)}</div>`:""}</div>`;
+}
+
+/* ---------- Fetch (bulk) ---------- */
+async function loadAll(limit=400){
+  ensureSB();
+  const [{ data: prompts, error: e1 }, { data: writings, error: e2 }] = await Promise.all([
+    sb.from("prompts_public").select("*").order("created_at",{ascending:false}).limit(limit),
+    sb.from("prompt_writings").select("id, prompt_id, author, ao3_url, created_at").order("created_at",{ascending:true})
+  ]);
+  if(e1) throw e1;
+  if(e2) throw e2;
+
+  PROMPTS = prompts || [];
+
+  // build map
+  WRITE_MAP = {};
+  (writings || []).forEach(w=>{
+    const pid = w.prompt_id;
+    (WRITE_MAP[pid] ||= []).push(w);
   });
 }
 
-function escapeHTML(s){
-  return String(s ?? '').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+/* ---------- AO3 helpers ---------- */
+function getWritings(pid){ return WRITE_MAP[pid] || []; }
+function hasAo3(pid){ return getWritings(pid).some(w => !!w.ao3_url); }
+
+/* ---------- Pair color class (matches your CSS) ---------- */
+const KNOWN = new Set([
+  "riku-yushi","riku-sion","riku-jaehee","yushi-sion","yushi-jaehee","sion-jaehee",
+  "riku-yushi-jaehee","riku-yushi-sion","riku-jaehee-sion","yushi-jaehee-sion",
+  "riku-yushi-jaehee-sion"
+]);
+function normTokens(s){
+  return S(s).toLowerCase()
+    .split(/[\/,]/).map(x=>x.trim()).filter(Boolean)
+    .map(x => ({ riku:"riku", yushi:"yushi", sion:"sion", jaehee:"jaehee" }[x] || x));
 }
-const row = (L,R) => `<div class="meta-row"><b>${L}</b><span>${R}</span></div>`;
-
-const SHARE_BASE = (window.PUBLIC_BASE_URL || (location.origin + location.pathname)).replace(/#.*$/,'');
-const shareURL = (id) => `${SHARE_BASE}#prompt-${id}`;
-
-function truncateLead(text, max=180){
-  const t = String(text || '');
-  if (t.length <= max) return t;
-  return t.slice(0, max).replace(/\s+\S*$/, '') + '…';
-}
-
-/* outline color by ship -> CSS pairing classes */
-function pairClass(shipRaw){
-  const s = (shipRaw||'').toLowerCase();
-  const set = new Set(s.replace(/[^\w/ ,/]/g,'').split(/[,\s/]+/).filter(Boolean));
-  const who = ['riku','yushi','sion','jaehee'].filter(n => set.has(n));
-  if (!who.length) return '';
-  const key = who.sort().join('-');
-  switch(key){
-    case 'riku-jaehee': return 'pair-riku-jaehee';
-    case 'riku-sion': return 'pair-riku-sion';
-    case 'riku-yushi': return 'pair-riku-yushi';
-    case 'jaehee-sion': return 'pair-sion-jaehee';
-    case 'jaehee-yushi': return 'pair-yushi-jaehee';
-    case 'sion-yushi': return 'pair-yushi-sion';
-    case 'jaehee-riku-sion': return 'pair-riku-jaehee-sion';
-    case 'jaehee-riku-yushi': return 'pair-riku-yushi-jaehee';
-    case 'jaehee-sion-yushi': return 'pair-yushi-jaehee-sion';
-    case 'riku-sion-yushi':  return 'pair-riku-yushi-sion';
-    case 'jaehee-riku-sion-yushi': return 'pair-riku-yushi-jaehee-sion';
-    default: return '';
+function choosePairKey(ship){
+  const t = Array.from(new Set(normTokens(ship))).sort();
+  if(t.length>=4){ const k=t.slice(0,4).join("-"); if(KNOWN.has(k)) return k; }
+  if(t.length>=3){
+    // try every 3-combo that is known
+    for(let i=0;i<t.length;i++){
+      for(let j=i+1;j<t.length;j++){
+        for(let k=j+1;k<t.length;k++){
+          const key=[t[i],t[j],t[k]].join("-");
+          if(KNOWN.has(key)) return key;
+        }
+      }
+    }
   }
-}
-
-/* ---------- State & data ---------- */
-const state = loadStore();
-let prompts = []; // filled from Supabase
-
-/* ---------- Supabase load (ambil >100 row, Safari-safe) ---------- */
-async function loadFromSupabase(){
-  if (!window.supabase) throw new Error('supabase-js not loaded');
-  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
-    throw new Error('Missing SUPABASE_URL / SUPABASE_ANON_KEY on window');
+  if(t.length>=2){
+    // prefer the first two tokens as written order-agnostic
+    const k = [t[0], t[1]].join("-");
+    if(KNOWN.has(k)) return k;
+    // also try any other pair found
+    for(let i=0;i<t.length;i++){
+      for(let j=i+1;j<t.length;j++){
+        const k2=[t[i],t[j]].join("-");
+        if(KNOWN.has(k2)) return k2;
+      }
+    }
   }
-
-  const client = window.supabase.createClient(
-    window.SUPABASE_URL,
-    window.SUPABASE_ANON_KEY,
-    { global: { fetch: (url, opts) => fetch(url, { ...opts, mode: 'cors' }) } }
-  );
-
-  // 1) get total rows without fetching data (avoids default 100 limit)
-  const { count, error: countErr } = await client
-    .from('prompts_public')
-    .select('*', { head: true, count: 'exact' });
-  if (countErr) throw countErr;
-  if (count == null) throw new Error('View not accessible (count=null). Check RLS/GRANT on prompts_public.');
-
-  // 2) fetch ALL rows & columns (use '*' so it doesn’t break when column names differ)
-  const { data, error } = await client
-    .from('prompts_public')
-    .select('*')
-    .range(0, Math.max(0, count - 1))
-    .order('title', { ascending: true });
-
-  if (error) throw error;
-  if (!Array.isArray(data)) throw new Error('No rows returned');
-
-  // 3) normalize to the shape your UI expects
-  prompts = data.map(r => ({
-    ...r,
-    id: String(r.id),
-    // Show "Prompter" in UI but source from submitted_by (fallback to prompter if exists; then 'anon')
-    prompter: (r.submitted_by ?? r.prompter ?? 'anon'),
-    // Handle either desc or description from the view
-    description: (r.description ?? r.desc ?? '-'),
-  }));
+  return null;
+}
+function applyPairClass(card, ship){
+  const key = choosePairKey(ship || "");
+  if(key) card.classList.add(`pair-${key}`);
 }
 
-/* ---------- Render ---------- */
-const grid = $('#promptGrid');
-const dlg  = $('#promptModal');
-const dlgContent = $('#modalContent');
-
-function renderAll(){
-  grid.innerHTML = '';
-  prompts.forEach(p => grid.appendChild(renderCard(p)));
-  applyFilters();
+/* ---------- Chips renderer ---------- */
+function renderAO3WrittenChips(pid){
+  const arr = getWritings(pid).filter(w=>!!w.ao3_url);
+  return `
+    <div class="chips" data-row="ao3-written">
+      ${arr.map(w=>{
+        const name = (w.author ?? "").trim() || "(anon)";
+        const url  = (w.ao3_url ?? "").trim();
+        return `
+          <span class="chip">
+            ✍️ ${escapeHTML(name)} · <a href="${escapeHTML(url)}" target="_blank" rel="noopener">Read</a>
+            <button class="chip-x" title="remove" data-action="remove-ao3-written" data-wid="${escapeHTML(w.id)}">×</button>
+          </span>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
+/* ---------- Card ---------- */
 function renderCard(p){
-  const local = state[p.id] || {};
-  const gifts = local.gifts ?? [];
-  const ao3s  = local.ao3s  ?? [];
-  const prompter = (local.prompter ?? p.prompter ?? 'anon');
-  const descText = p.description ?? '-';
-
-  const lead = truncateLead(p.prompt || '');
-  const hasMore = (p.prompt || '').length > lead.length;
-
-  const card = document.createElement('article');
-  card.className = `card ${pairClass(p.ship||'')}`;
-  card.id = `prompt-${p.id}`;
+  const card = document.createElement("div");
+  card.className = "card";
   card.dataset.id = p.id;
+  applyPairClass(card, p.ship);
+
+  const full  = S(p.prompt);
+  const short = full.length > 170 ? full.slice(0,165) + "…" : full;
+  const hasMore = full.length > short.length;
+
+  const ao3Count = getWritings(p.id).filter(w=>!!w.ao3_url).length;
 
   card.innerHTML = `
-    <h3>${escapeHTML(p.title || `Prompt ${p.id}`)}</h3>
-    ${p.prompt ? `
-      <p class="lead" data-full="${escapeHTML(p.prompt)}" data-short="${escapeHTML(lead)}">${escapeHTML(lead)}</p>
-      ${hasMore ? `<button class="link-btn" data-action="toggle-full">Read more</button>`:``}
-    ` : ''}
+    <h3>${escapeHTML(p.title || "Prompt")}</h3>
+    ${full ? `
+      <p class="prompt-text lead" data-full="${escapeHTML(full)}" data-short="${escapeHTML(short)}">${escapeHTML(short)}</p>
+      ${hasMore ? `<button class="link-btn" data-action="toggle-full">Read more</button>` : ``}
+    ` : ``}
 
     <div class="meta">
-      ${row('Description', escapeHTML(descText))}
-      ${row('Ship',        escapeHTML(p.ship||'-'))}
-      ${row('Genre',       escapeHTML(p.genre||'-'))}
-      ${row('Characters',  escapeHTML(p.characters||'-'))}
-      ${row('Rating',      escapeHTML(p.rating||'-'))}
-      <div class="meta-row">
-        <b>Prompter</b>
-        <span class="prompter-text">${escapeHTML(prompter)}</span>
-      </div>
+      ${row("Description", S(p.description || "-"))}
+      ${row("Ship",       S(p.ship || "-"))}
+      ${row("Genre",      S(p.genre || "-"))}
+      ${row("Characters", S(p.characters || "-"))}
+      ${row("Rating",     S(p.rating || "-"))}
+      <div class="meta-row"><b>Prompter</b><span class="prompter-text">${escapeHTML(S(p.prompter || "anon"))}</span></div>
     </div>
 
-    <div class="status">
-      <span class="pill">🎁 Status: <b>Gifted ×${gifts.length}</b></span>
-      <span class="pill">📖 AO3: <b>Links ×${ao3s.length}</b></span>
-    </div>
+    <div class="pill">📖 AO3: <b>Links ×${ao3Count}</b></div>
 
     <div class="actions">
-      <button class="btn btn-green" data-action="gift">🎁 Add Gift</button>
-      <button class="btn btn-blue"  data-action="add-ao3">📚 Add AO3</button>
+      <button class="btn" data-action="add-ao3-written">📚 Add AO3 Written by</button>
     </div>
 
-    ${gifts.length ? renderGiftChips(gifts) : ''}
-    ${ao3s.length   ? renderAO3Chips(ao3s)   : ''}
+    ${renderAO3WrittenChips(p.id)}
 
     <div class="share-line">
       <span>🔗 Share:</span>
@@ -170,265 +183,195 @@ function renderCard(p){
     </div>
   `;
 
-  card.addEventListener('click', async (e)=>{
-    const aShare = e.target.closest('a.share-a');
-    if (aShare){
-      e.preventDefault();
-      try { await copyToClipboard(aShare.href); } catch {}
-      location.href = aShare.href; // open deep-link modal for everyone
+  card.addEventListener("click", async (e)=>{
+    const btn = e.target.closest("[data-action]");
+    if(!btn) return;
+    const act = btn.dataset.action;
+
+    if (act === "toggle-full"){
+      const pEl = card.querySelector(".lead");
+      const showFull = pEl.textContent === pEl.dataset.full;
+      pEl.textContent = showFull ? pEl.dataset.short : pEl.dataset.full;
+      btn.textContent = showFull ? "Read more" : "Read less";
       return;
     }
 
-    const btn = e.target.closest('button[data-action]');
-    if (!btn) return;
-    const act = btn.dataset.action;
+    if (act === "add-ao3-written"){
+      await onAddAo3Written(p.id);
+      refreshCardUI(card, p.id);
+      return;
+    }
 
-    if (act === 'toggle-full')   return onToggleFull(card, btn);
-    if (act === 'gift')          return onGift(p, card);
-    if (act === 'add-ao3')       return onAddAO3(p, card);
-    if (act === 'remove-gift')   return onRemoveGift(p, card, btn.dataset.name);
-    if (act === 'remove-ao3')    return onRemoveAO3(p, card, btn.dataset.url);
+    if (act === "remove-ao3-written"){
+      const wid = btn.dataset.wid;
+      await onRemoveAo3Written(wid, p.id);
+      refreshCardUI(card, p.id);
+      return;
+    }
   });
 
   return card;
 }
 
-function renderCardForModal(p){
-  const local = state[p.id] || {};
-  const gifts = local.gifts ?? [];
-  const ao3s  = local.ao3s  ?? [];
-  const prompter = (local.prompter ?? p.prompter ?? 'anon');
-  const descText = p.description ?? '-';
+function refreshCardUI(card, pid){
+  // update pill count
+  const count = getWritings(pid).filter(w=>!!w.ao3_url).length;
+  const pill = card.querySelector(".pill");
+  if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${count}</b>`;
 
-  const wrap = document.createElement('article');
-  wrap.className = `card ${pairClass(p.ship||'')}`;
-  wrap.innerHTML = `
-    <h3>${escapeHTML(p.title || `Prompt ${p.id}`)}</h3>
-    ${p.prompt ? `<p class="lead">${escapeHTML(p.prompt)}</p>` : ''}
-
-    <div class="meta">
-      ${row('Description', escapeHTML(descText))}
-      ${row('Ship',        escapeHTML(p.ship||'-'))}
-      ${row('Genre',       escapeHTML(p.genre||'-'))}
-      ${row('Characters',  escapeHTML(p.characters||'-'))}
-      ${row('Rating',      escapeHTML(p.rating||'-'))}
-      <div class="meta-row">
-        <b>Prompter</b>
-        <span class="prompter-text">${escapeHTML(prompter)}</span>
-      </div>
-    </div>
-
-    <div class="status">
-      <span class="pill">🎁 Status: <b>Gifted ×${gifts.length}</b></span>
-      <span class="pill">📖 AO3: <b>Links ×${ao3s.length}</b></span>
-    </div>
-
-    <div class="actions">
-      <button class="btn btn-green" data-action="gift">🎁 Add Gift</button>
-      <button class="btn btn-blue"  data-action="add-ao3">📚 Add AO3</button>
-    </div>
-
-    ${gifts.length ? renderGiftChips(gifts) : ''}
-    ${ao3s.length   ? renderAO3Chips(ao3s)   : ''}
-
-    <div class="share-line">
-      <span>🔗 Share:</span>
-      <a class="share-a" href="${shareURL(p.id)}" data-id="${p.id}">link</a>
-    </div>
-  `;
-
-  wrap.addEventListener('click', async (e)=>{
-    const aShare = e.target.closest('a.share-a');
-    if (aShare){
-      e.preventDefault();
-      try { await copyToClipboard(aShare.href); } catch {}
-      location.href = aShare.href;
-      return;
-    }
-    const btn = e.target.closest('button[data-action]');
-    if(!btn) return;
-    const act = btn.dataset.action;
-
-    if (act === 'gift')          return onGift(p, wrap);
-    if (act === 'add-ao3')       return onAddAO3(p, wrap);
-    if (act === 'remove-gift')   return onRemoveGift(p, wrap, btn.dataset.name);
-    if (act === 'remove-ao3')    return onRemoveAO3(p, wrap, btn.dataset.url);
-  });
-
-  return wrap;
+  // replace chips row
+  const chips = card.querySelector('[data-row="ao3-written"]');
+  const html  = renderAO3WrittenChips(pid);
+  if (chips) chips.outerHTML = html;
+  else card.insertAdjacentHTML("beforeend", html);
 }
 
-/* ---------- Chip helpers ---------- */
-function renderGiftChips(list){
-  return `
-    <div class="chip-row">
-      ${list.map(name=>`
-        <span class="chip">
-          🎁 ${escapeHTML(name)}
-          <button class="chip-x" data-action="remove-gift" data-name="${escapeHTML(name)}">×</button>
-        </span>
-      `).join('')}
-    </div>
-  `;
-}
-function renderAO3Chips(list){
-  return `
-    <div class="chip-row">
-      ${list.map(url=>`
-        <span class="chip">
-          📖 <a href="${escapeHTML(url)}" target="_blank" rel="noopener">Read</a>
-          <button class="chip-x" data-action="remove-ao3" data-url="${escapeHTML(url)}">×</button>
-        </span>
-      `).join('')}
-    </div>
-  `;
-}
+/* ---------- AO3 actions (DB) ---------- */
+async function onAddAo3Written(promptId){
+  const authorRaw = prompt("Author name / handle:");
+  if (!authorRaw) return;
+  const author = authorRaw.trim();
+  if (!author) { alert("Author cannot be empty."); return; }
 
-/* ---------- Actions ---------- */
-function onToggleFull(card, btn){
-  const p = $('.lead', card);
-  const expanded = btn.getAttribute('data-expanded') === '1';
-  if (expanded){ p.textContent = p.dataset.short; btn.textContent = 'Read more'; btn.setAttribute('data-expanded','0'); }
-  else { p.textContent = p.dataset.full; btn.textContent = 'Read less'; btn.setAttribute('data-expanded','1'); }
+  const urlRaw = prompt("AO3 URL:");
+  if (!urlRaw) return;
+  const ao3 = urlRaw.trim();
+  if (!ao3) { alert("AO3 URL cannot be empty."); return; }
+
+  ensureSB();
+  const { data, error } = await sb.from("prompt_writings")
+    .insert([{ prompt_id: promptId, author, ao3_url: ao3 }])
+    .select("id, prompt_id, author, ao3_url, created_at")
+    .single();
+
+  if (error){ toast(toErr(error), "err"); return; }
+
+  // push to map
+  (WRITE_MAP[promptId] ||= []).push(data);
+  toast("AO3 Written-by added ✅", "ok");
 }
 
-function onGift(p, scope){
-  const loc = state[p.id] || (state[p.id]={});
-  const who = prompt('Gift to (Twitter @ / Email):'); if(!who) return;
-  loc.gifts = loc.gifts || []; loc.gifts.push(who.trim()); saveStore();
+async function onRemoveAo3Written(writingId, promptId){
+  ensureSB();
+  const { error } = await sb.from("prompt_writings").delete().eq("id", writingId);
+  if (error){ toast(toErr(error), "err"); return; }
 
-  const row0 = scope.querySelector('.chip-row');
-  const html = renderGiftChips(loc.gifts);
-  row0 && row0.textContent.includes('🎁') ? (row0.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
-
-  const pill = scope.querySelectorAll('.status .pill')[0];
-  if (pill) pill.innerHTML = `🎁 Status: <b>Gifted ×${loc.gifts.length}</b>`;
+  // remove from map
+  WRITE_MAP[promptId] = (WRITE_MAP[promptId] || []).filter(w => w.id !== writingId);
+  toast("Removed", "ok");
 }
 
-function onRemoveGift(p, scope, name){
-  const loc = state[p.id] || (state[p.id]={});
-  loc.gifts = (loc.gifts||[]).filter(n => n !== name); saveStore();
+/* ---------- Filters ---------- */
+function norm(s){ return S(s).toLowerCase().replace(/\s+/g,' ').trim(); }
+function splitNames(s){ return norm(s).split(/[\/,]/).map(x=>x.trim()).filter(Boolean); }
 
-  const btn = scope.querySelector(`button[data-action="remove-gift"][data-name="${CSS.escape(name)}"]`);
-  btn?.parentElement?.remove();
-  const pill = scope.querySelectorAll('.status .pill')[0];
-  if (pill) pill.innerHTML = `🎁 Status: <b>Gifted ×${(loc.gifts||[]).length}</b>`;
+function shipMatches(pship, selected){
+  const need = splitNames(selected);
+  if(!need.length) return true;
+  const hay = splitNames(pship);
+  return need.every(n => hay.includes(n));
+}
+function contains(field, q){
+  if(!q) return true;
+  return norm(field).includes(norm(q));
+}
+function matchesSearch(p, q){
+  if(!q) return true;
+  const hay = [p.title, p.prompt, p.description, p.ship, p.genre, p.characters, p.rating, p.prompter]
+    .map(S).join(" • ");
+  return contains(hay, q);
 }
 
-function onAddAO3(p, scope){
-  const loc = state[p.id] || (state[p.id]={});
-  const url = prompt('Paste AO3 link:'); if(!url) return;
-  loc.ao3s = loc.ao3s || []; loc.ao3s.push(url.trim()); saveStore();
+function applyFilters(){
+  const list = LIST(); if(!list) return;
+  list.innerHTML = "";
 
-  const rows = scope.querySelectorAll('.chip-row');
-  let ao3Row = null;
-  if (rows.length === 1 && !rows[0].textContent.includes('🎁')) ao3Row = rows[0];
-  if (rows.length >= 2) ao3Row = rows[1];
+  const q       = $("#searchBar")?.value || "";
+  const fShip   = $("#shipFilter")?.value || "";
+  const fGenre  = $("#genreFilter")?.value || "";
+  const fChar   = $("#characterFilter")?.value || "";
+  const fRate   = $("#ratingFilter")?.value || "";
+  const ao3Btn  = $("#ao3PostedBtn");
+  const ao3Mode = ao3Btn && ao3Btn.getAttribute("aria-pressed")==="true" ? "has" : "all";
 
-  const html = renderAO3Chips(loc.ao3s);
-  ao3Row ? (ao3Row.outerHTML = html) : scope.insertAdjacentHTML('beforeend', html);
+  let rows = PROMPTS.slice();
 
-  const pill = scope.querySelectorAll('.status .pill')[1];
-  if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${loc.ao3s.length}</b>`;
+  if (ao3Mode === "has") rows = rows.filter(p => hasAo3(p.id));
+  rows = rows.filter(p => matchesSearch(p, q));
+  rows = rows.filter(p => shipMatches(p.ship || "", fShip));
+  rows = rows.filter(p => contains(p.genre || "", fGenre));
+  rows = rows.filter(p => contains((p.characters || "") + " " + (p.ship || ""), fChar));
+  rows = rows.filter(p => contains(p.rating || "", fRate));
+
+  rows.forEach(p => list.appendChild(renderCard(p)));
+  if(!rows.length) renderEmpty("No results for current filters");
 }
 
-function onRemoveAO3(p, scope, url){
-  const loc = state[p.id] || (state[p.id]={});
-  loc.ao3s = (loc.ao3s||[]).filter(u => u !== url); saveStore();
+function wireFilters(){
+  $("#searchBar")?.addEventListener("input", applyFilters);
+  $("#shipFilter")?.addEventListener("change", applyFilters);
+  $("#genreFilter")?.addEventListener("change", applyFilters);
+  $("#characterFilter")?.addEventListener("change", applyFilters);
+  $("#ratingFilter")?.addEventListener("change", applyFilters);
 
-  const btn = scope.querySelector(`button[data-action="remove-ao3"][data-url="${CSS.escape(url)}"]`);
-  btn?.parentElement?.remove();
-  const pill = scope.querySelectorAll('.status .pill')[1];
-  if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${(loc.ao3s||[]).length}</b>`;
-}
+  const pill = $("#ao3PostedBtn");
+  if(pill){
+    pill.addEventListener("click", ()=>{
+      const pressed = pill.getAttribute("aria-pressed")==="true";
+      pill.setAttribute("aria-pressed", String(!pressed));
+      applyFilters();
+    });
+  }
 
-/* ---------- Filters & mascot shortcuts ---------- */
-function bindFiltersAndShortcuts(){
-  $('#searchBar')?.addEventListener('input', applyFilters);
-  $('#shipFilter')?.addEventListener('change', applyFilters);
-  $('#genreFilter')?.addEventListener('change', applyFilters);
-  $('#characterFilter')?.addEventListener('change', applyFilters);
-  $('#ratingFilter')?.addEventListener('change', applyFilters);
-  $('#ao3PostedBtn')?.addEventListener('click', t=>{
-    const on = t.currentTarget.getAttribute('aria-pressed') === 'true';
-    t.currentTarget.setAttribute('aria-pressed', String(!on)); applyFilters();
-  });
-
-  $$('.mascot').forEach(img=>{
-    img.addEventListener('click', ()=>{
-      const who = img.getAttribute('data-char') || '';
-      const sel = $('#characterFilter'); if (!sel) return;
-      sel.value = who; applyFilters();
-      grid.scrollIntoView({behavior:'smooth', block:'start'});
+  // mascot quick character filter
+  $$(".mascot[data-char]").forEach(img=>{
+    img.addEventListener("click", ()=>{
+      const who = img.getAttribute("data-char") || "";
+      const sel = $("#characterFilter"); if(sel){ sel.value = who; }
+      applyFilters();
     });
   });
 }
 
-function applyFilters(){
-  const q = ($('#searchBar')?.value || '').trim().toLowerCase();
-  const ship = $('#shipFilter')?.value || '';
-  const genre = $('#genreFilter')?.value || '';
-  const character = $('#characterFilter')?.value || '';
-  const rating = $('#ratingFilter')?.value || '';
-  const ao3Only = $('#ao3PostedBtn')?.getAttribute('aria-pressed') === 'true';
-
-  prompts.forEach(p=>{
-    const el = $(`#prompt-${p.id}`); if (!el) return;
-    const loc = state[p.id] || {};
-    let ok = true;
-
-    if(q){
-      const hay = (p.title+' '+(p.prompt||'')+' '+(p.ship||'')+' '+(p.characters||'')).toLowerCase();
-      ok = ok && hay.includes(q);
-    }
-    if(ship)      ok = ok && (p.ship||'').includes(ship);
-    if(genre)     ok = ok && (p.genre||'') === genre;
-    if(character) ok = ok && (p.characters||'').includes(character);
-    if(rating)    ok = ok && (p.rating||'') === rating;
-    if(ao3Only)   ok = ok && !!((loc.ao3s && loc.ao3s.length));
-
-    el.style.display = ok ? '' : 'none';
-  });
-}
-
-/* ---------- Deep-link modal routing ---------- */
-function setupModalRouting(){
-  handleHashRoute();
-  window.addEventListener('hashchange', handleHashRoute);
-
-  dlg?.addEventListener('click', (e)=>{
-    if (e.target.matches('[data-close]')) {
-      dlg.close();
-      history.replaceState(null,'', location.pathname + location.search);
-    }
-  });
-}
-
-function handleHashRoute(){
-  const id = (location.hash || '').replace('#prompt-','');
-  if (!id) { dlg?.open && dlg.close(); return; }
-  openPromptModalById(id);
-}
-
-function openPromptModalById(id){
-  const p = prompts.find(x => String(x.id) === String(id));
-  if (!p) return;
-  dlgContent.innerHTML = '';
-  dlgContent.appendChild(renderCardForModal(p));
-  if (typeof dlg.showModal === 'function') dlg.showModal();
-  else dlg.setAttribute('open','');
-}
-
 /* ---------- Boot ---------- */
-(async function boot(){
+window.addEventListener("unhandledrejection", (e)=>toast(toErr(e.reason), "err"));
+window.addEventListener("error", (e)=> e.message && toast(e.message, "err"));
+
+document.addEventListener("DOMContentLoaded", async ()=>{
   try{
-    await loadFromSupabase();     // fetch rows
-    renderAll();                  // render cards
-    bindFiltersAndShortcuts();    // wire filters
-    setupModalRouting();          // enable deep-link modal
-    if (location.hash && location.hash.startsWith('#prompt-')) handleHashRoute();
+    await loadAll(400);
+    wireFilters();
+    applyFilters();
   }catch(e){
-    console.error('[WFFPB] Supabase load failed:', e);
-    grid.innerHTML = `<p style="padding:1rem">Couldn’t load prompts from Supabase.<br><b>${escapeHTML(e.message)}</b></p>`;
+    console.error(e);
+    renderEmpty(toErr(e));
   }
-})();
+});
+
+async function addAo3Written(promptId) {
+  const author = prompt('Author?'); if (!author) return;
+  const ao3    = prompt('AO3 URL?'); if (!ao3) return;
+
+  const { error } = await window.sb
+    .from('prompt_writings')
+    .insert([{ prompt_id: promptId, author, ao3_url: ao3 }]);
+
+  if (error) { alert('Gagal: ' + (error.message || 'Unknown')); return; }
+
+  // refresh kartu (ao3_count akan ikut update dari view)
+  await refreshOneCard(promptId);
+}
+async function saveAnnotations(promptId, { ao3_links, prompter_override }) {
+  const payload = { prompt_id: promptId, ao3_links, prompter_override };
+  const { error } = await window.sb
+    .from('prompt_annotations')
+    .upsert(payload, { onConflict: 'prompt_id' }); // butuh index unik di atas
+
+  if (error) alert('Gagal simpan annotation: ' + error.message);
+}
+
+async function refreshOneCard(promptId) {
+  const card = document.querySelector(`[data-id="${promptId}"]`);
+  if (!card) return;
+  card.innerHTML = renderCard(PROMPTS.find(p => p.id === promptId));
+}
