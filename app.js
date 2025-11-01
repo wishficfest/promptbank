@@ -394,7 +394,7 @@ function renderCard(p){
       ${p.ao3_link ? rowHTML("AO3 (base)", `<a href="${escapeHTML(p.ao3_link)}" target="_blank" rel="noopener">Open</a>`) : ""}
     </div>
 
-    <div class="pill">📖 AO3: <b>Links ×${ao3Count}</b></div>
+    <div class="pill">📖 Works: <b>Links ×${ao3Count}</b></div>
 
     <div class="actions">
       <button class="btn" data-action="add-ao3-written">📚 Add Writing Link</button>
