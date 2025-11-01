@@ -15,7 +15,7 @@ function ensureSB(){
 
 /* ---------- State ---------- */
 let PROMPTS = [];
-let WRITE_MAP = {};
+let WRITE_MAP = {};   // { prompt_id: [ {id, prompt_id, author, ao3_url, created_at, ...} ] }
 
 /* ---------- Small helpers ---------- */
 const $  = (s, r=document) => r.querySelector(s);
@@ -61,30 +61,44 @@ function renderEmpty(reason=""){
 }
 
 /* ---------- Fetch (bulk) ---------- */
-async function loadAll(limit=400){
+async function loadAll(limit = 1000){
   ensureSB();
-  const [{ data: prompts, error: e1 }, { data: writings, error: e2 }] = await Promise.all([
-    sb.from("prompts_public").select("*").order("created_at",{ascending:false}).limit(limit),
-    sb.from("prompt_writings").select("id, prompt_id, author, ao3_url, created_at").order("created_at",{ascending:true})
+
+  const [promRes, writeRes] = await Promise.all([
+    sb.from("prompts")
+      .select("id,title,prompt,ship,genre,characters,rating,votes,ao3_link,submitted_by,created_at,description,claimed,fulfilled,gifted_to")
+      .order("created_at", { ascending:false })
+      .limit(limit),
+    sb.from("prompt_writings")
+      .select("id,prompt_id,author,ao3_url,created_at")
+      .order("created_at", { ascending:true })
   ]);
-  if(e1) throw e1;
-  if(e2) throw e2;
+
+  if (promRes.error) throw promRes.error;
+  if (writeRes.error) throw writeRes.error;
 
   // Map submitted_by -> prompter for UI/filters
-  PROMPTS = (prompts || []).map(p => ({
+  PROMPTS = (promRes.data || []).map(p => ({
     ...p,
-    prompter: p.prompter ?? p.submitted_by ?? null
+    prompter: p.submitted_by ?? null
   }));
 
   WRITE_MAP = {};
-  (writings || []).forEach(w=>{
+  (writeRes.data || []).forEach(w=>{
     (WRITE_MAP[w.prompt_id] ||= []).push(w);
   });
 }
 
+function getPrompt(pid){ return PROMPTS.find(x => x.id === pid) || null; }
+
 /* ---------- AO3 helpers ---------- */
 function getWritings(pid){ return WRITE_MAP[pid] || []; }
-function hasAo3(pid){ return getWritings(pid).some(w => !!w.ao3_url); }
+function hasAo3(pid){
+  const p = getPrompt(pid);
+  const viaPrompt = !!(p && p.ao3_link);
+  const viaChild  = getWritings(pid).some(w => !!w.ao3_url);
+  return viaPrompt || viaChild;
+}
 
 /* ---------- Ship parsing ---------- */
 const SEP_RE = /[\/,×]|\s+x\s+|,/gi;
@@ -359,7 +373,9 @@ function renderCard(p){
   const full  = S(p.prompt);
   const short = full.length > 170 ? full.slice(0,165) + "…" : full;
   const hasMore = full.length > short.length;
-  const ao3Count = getWritings(p.id).filter(w=>!!w.ao3_url).length;
+
+  const ao3Base = p.ao3_link ? 1 : 0;
+  const ao3Count = ao3Base + getWritings(p.id).filter(w=>!!w.ao3_url).length;
 
   card.innerHTML = `
     <div class="card-head"><h3>${escapeHTML(p.title || "Prompt")}</h3></div>
@@ -374,13 +390,14 @@ function renderCard(p){
       ${row("Genre",      S(p.genre || "-"))}
       ${row("Characters", S(p.characters || "-"))}
       ${row("Rating",     S(p.rating || "-"))}
-      <div class="meta-row"><b>Prompter</b><span class="prompter-text">${escapeHTML(S(p.prompter || "anon"))}</span></div>
+      <div class="meta-row"><b>Prompter</b><span class="prompter-text">${escapeHTML(S(p.submitted_by || p.prompter || "anon"))}</span></div>
+      ${p.ao3_link ? rowHTML("AO3 (base)", `<a href="${escapeHTML(p.ao3_link)}" target="_blank" rel="noopener">Open</a>`) : ""}
     </div>
 
     <div class="pill">📖 AO3: <b>Links ×${ao3Count}</b></div>
 
     <div class="actions">
-      <button class="btn" data-action="add-ao3-written">📚 Add AO3 Written by</button>
+      <button class="btn" data-action="add-ao3-written">📚 Add Writing Link</button>
     </div>
 
     ${renderAO3WrittenChips(p.id)}
@@ -427,9 +444,13 @@ function renderCard(p){
 }
 
 function refreshCardUI(card, pid){
-  const count = getWritings(pid).filter(w=>!!w.ao3_url).length;
+  const p = getPrompt(pid);
+  const base = p && p.ao3_link ? 1 : 0;
+  const count = base + getWritings(pid).filter(w=>!!w.ao3_url).length;
+
   const pill = card.querySelector(".pill");
   if (pill) pill.innerHTML = `📖 AO3: <b>Links ×${count}</b>`;
+
   const chips = card.querySelector('[data-row="ao3-written"]');
   const html  = renderAO3WrittenChips(pid);
   if (chips) chips.outerHTML = html;
@@ -464,7 +485,10 @@ function ensurePreviewHost(){
 }
 
 function buildPreviewHTML(p){
-  const links = getWritings(p.id).filter(w => !!w.ao3_url);
+  const links = [
+    ...(p.ao3_link ? [{ author: "(base)", ao3_url: p.ao3_link }] : []),
+    ...getWritings(p.id).filter(w => !!w.ao3_url)
+  ];
   return `
     <div class="preview-card" role="dialog" aria-modal="true" style="pointer-events:auto;margin:12px auto;overflow:hidden">
       <div class="pv-head" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.05)">
@@ -564,7 +588,7 @@ function applyFilters(){
 
   let rows = PROMPTS.slice();
 
-  if (ao3Only) rows = rows.filter(p => hasAo3(p.id)); // compositional
+  if (ao3Only) rows = rows.filter(p => hasAo3(p.id));
   rows = rows.filter(p => matchesSearch(p, q));
   rows = rows.filter(p => shipMatches(p.ship || "", fShip));
   rows = rows.filter(p => promptHasGenre(p, fGenre));
@@ -626,9 +650,9 @@ window.addEventListener("error", (e)=> e.message && toast(e.message, "err"));
 
 document.addEventListener("DOMContentLoaded", async ()=>{
   try{
-    await loadAll(400);
+    await loadAll(1000);
     populateGenreFilter();
-    pruneEmptyGenres();   // hide genres that don't exist
+    pruneEmptyGenres();
     populateRatingFilter();
     wireFilters();
     applyFilters();
@@ -643,7 +667,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
 /* ---------- Public helpers (optional admin) ---------- */
 async function addAo3Written(promptId) {
   const author = prompt('Author?'); if (!author) return;
-  const ao3    = prompt('AO3 URL?'); if (!ao3) return;
+  const ao3 = prompt('Writing link (AO3 / Medium / GDocs / etc)?'); if (!ao3) return;
 
   ensureSB();
   const { error } = await sb.from('prompt_writings')
@@ -672,7 +696,7 @@ async function refreshOneCard(promptId) {
     WRITE_MAP[promptId] = data || [];
   }catch(e){}
 
-  const p = PROMPTS.find(x => x.id === promptId);
+  const p = getPrompt(promptId);
   if (!p) return;
   const fresh = renderCard(p);
   old.replaceWith(fresh);
@@ -680,10 +704,10 @@ async function refreshOneCard(promptId) {
 
 /* ---------- Internal AO3 actions ---------- */
 async function onAddAo3Written(promptId){
-  const authorRaw = prompt("Author name / handle:"); if (!authorRaw) return;
+  const authorRaw = prompt("Author name / Pen Name:"); if (!authorRaw) return;
   const author = authorRaw.trim(); if (!author) { alert("Author cannot be empty."); return; }
-  const urlRaw = prompt("AO3 URL:"); if (!urlRaw) return;
-  const ao3 = urlRaw.trim(); if (!ao3) { alert("AO3 URL cannot be empty."); return; }
+  const urlRaw = prompt("Writing Link (AO3 / Medium / GDocs / etc):"); if (!urlRaw) return;
+  const ao3 = urlRaw.trim(); if (!ao3) { alert("Writing Link cannot be empty."); return; }
 
   ensureSB();
   const { data, error } = await sb.from("prompt_writings")
@@ -702,35 +726,17 @@ async function onRemoveAo3Written(writingId, promptId){
   WRITE_MAP[promptId] = (WRITE_MAP[promptId] || []).filter(w => w.id !== writingId);
   toast("Removed", "ok");
 }
+
+/* ---------- Extra synonyms (optional extension) ---------- */
 Object.assign(TAG_SYNONYMS, {
-  // ——— M/M dan variasinya
   "m/m":"M/M","m,m":"M/M","m , m":"M/M","m / m":"M/M","mm":"M/M","m m":"M/M",
-
-  // ——— Hurt No Comfort
-  "hurt no comfort":"Hurt No Comfort",
-  "hurt-no-comfort":"Hurt No Comfort",
-  "hnc":"Hurt No Comfort",
-  "hurt without comfort":"Hurt No Comfort",
-
-  // ——— Identity Crisis & Mental Health
-  "identity crisis":"Identity Crisis",
-  "mental health":"Mental Health",
-
-  // ——— Stranger → Lover → Stranger (banyak versi user)
+  "hurt no comfort":"Hurt No Comfort","hurt-no-comfort":"Hurt No Comfort","hnc":"Hurt No Comfort","hurt without comfort":"Hurt No Comfort",
+  "identity crisis":"Identity Crisis","mental health":"Mental Health",
   "stranger to lover to stranger again":"Stranger → Lover → Stranger",
   "strangers to lovers to strangers again":"Stranger → Lover → Stranger",
   "stranger→lover→stranger":"Stranger → Lover → Stranger",
   "stranger - lover - stranger":"Stranger → Lover → Stranger",
-
-  // ——— Pining
-  "mutual pinning":"Mutual Pining","pinning":"Mutual Pining","pining":"Mutual Pining","yearning":"Yearning",
-
-  // ——— Lain yg sering muncul
   "hurt,comfort":"Hurt/Comfort","hurt comfort":"Hurt/Comfort","hurt , comfort":"Hurt/Comfort",
-  "highschool crushes":"Highschool Crushes",
-  "zombie apocalypse":"Zombie Apocalypse",
-
-  // ——— Drop/hide (biarkan kosong agar tak muncul di dropdown)
-  "older/younger dynamic":"",   // <— dihapus dari opsi
-  "riku-centric":"", "jaehee-centric":"", "sion centric":""
+  "highschool crushes":"Highschool Crushes","zombie apocalypse":"Zombie Apocalypse",
+  "older/younger dynamic":"", "riku-centric":"", "jaehee-centric":"", "sion centric":""
 });
